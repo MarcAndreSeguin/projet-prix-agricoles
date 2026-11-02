@@ -1,0 +1,3 @@
+Les fichiers de ce dossier sont FACTICES (scripts/generer_resultats_factices.py).
+Ils servent uniquement à développer l'interface et n'ont aucune valeur d'analyse.
+Ce fichier sera supprimé par scripts/executer_evaluation.py.
