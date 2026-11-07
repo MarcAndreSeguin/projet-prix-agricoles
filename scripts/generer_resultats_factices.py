@@ -2,13 +2,16 @@
 
 Usage : python scripts/generer_resultats_factices.py [--forcer]
 
-Les prévisions sont fabriquées à partir des vraies séries de data/series.csv :
-dernier prix connu à l'origine, plus un écart aléatoire propre à chaque modèle
-(le modèle naïf n'a aucun écart). Les intervalles sont calculés en log, avec une
-largeur proportionnelle à l'écart-type des variations mensuelles avant
-config.DATE_DEBUT_TEST et à la racine du nombre de pas, puis ramenés en dollars.
-Quelques prévisions à l'horizon 1 sont décalées volontairement pour que le prix
-observé sorte de l'intervalle à 95 % et déclenche une alerte.
+Les prévisions sont fabriquées à partir des vraies séries de data/series.csv,
+sur les mêmes paires origine-cible que l'évaluation réelle (six blocs de
+validation et test, src/evaluation.py, generer_paires_origine_cible()), avec la
+colonne periode : dernier prix connu à l'origine, plus un écart aléatoire propre
+à chaque modèle (le modèle naïf n'a aucun écart). Les intervalles sont calculés
+en log, avec une largeur proportionnelle à l'écart-type des variations
+mensuelles avant config.DATE_DEBUT_TEST et à la racine du nombre de pas, puis
+ramenés en dollars. Quelques prévisions de test à l'horizon 1 sont décalées
+volontairement pour que le prix observé sorte de l'intervalle à 95 % et
+déclenche une alerte.
 
 Fichiers produits : previsions.csv, previsions_futures.csv, metriques.csv,
 tests_dm.csv et le marqueur FACTICE.txt. Ces résultats n'ont aucune valeur
@@ -30,7 +33,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src import config  # noqa: E402
 from src.chargement import charger_series  # noqa: E402
-from src.evaluation import calculer_metriques, calculer_tests_dm  # noqa: E402
+from src.evaluation import (  # noqa: E402
+    calculer_metriques,
+    calculer_tests_dm,
+    generer_paires_origine_cible,
+)
 
 GRAINE = 5103
 NB_HORS_INTERVALLE_PAR_SERIE = 3
@@ -60,33 +67,37 @@ def construire_ligne(serie, modele, origine, cible, horizon, log_prevision, sigm
     }
 
 
-def prevoir(rng, serie, origine, prix_origine, sigma_mensuel, avec_reel, prix_par_date):
-    """Prévisions factices des 4 modèles pour une origine, sur les 3 horizons."""
+def prevoir(rng, serie, origine, cible, horizon, pas, prix_origine, sigma_mensuel):
+    """Prévisions factices des 3 modèles pour une paire origine-cible."""
     lignes = []
-    for horizon, pas in config.PAS_PAR_HORIZON.items():
-        cible = origine + pd.DateOffset(months=pas)
-        if avec_reel and cible not in prix_par_date.index:
-            continue
-        for modele, (biais, ecart, facteur) in PARAMETRES.items():
-            log_prevision = np.log(prix_origine) + biais * pas + rng.normal(0, ecart * np.sqrt(pas))
-            sigma = facteur * sigma_mensuel * np.sqrt(pas)
-            ligne = construire_ligne(serie, modele, origine, cible, horizon, log_prevision, sigma)
-            ligne["sigma"] = sigma
-            if avec_reel:
-                ligne["reel"] = prix_par_date[cible]
-            lignes.append(ligne)
+    for modele, (biais, ecart, facteur) in PARAMETRES.items():
+        log_prevision = np.log(prix_origine) + biais * pas + rng.normal(0, ecart * np.sqrt(pas))
+        sigma = facteur * sigma_mensuel * np.sqrt(pas)
+        ligne = construire_ligne(serie, modele, origine, cible, horizon, log_prevision, sigma)
+        ligne["sigma"] = sigma
+        lignes.append(ligne)
     return lignes
 
 
-def forcer_hors_intervalle(rng, previsions):
-    """Décale quelques prévisions à l'horizon 1 pour que le réel sorte de l'IC 95 %.
+def paires_a_evaluer():
+    """Paires origine-cible des blocs de validation et du test, avec leur période."""
+    morceaux = [generer_paires_origine_cible(debut, fin).assign(periode="validation")
+                for debut, fin in config.PERIODES_VALIDATION]
+    morceaux.append(generer_paires_origine_cible(config.DATE_DEBUT_TEST, config.DATE_FIN_TEST)
+                    .assign(periode="test"))
+    return pd.concat(morceaux, ignore_index=True)
 
-    Le décalage est appliqué aux 4 modèles pour la même série et la même date
+
+def forcer_hors_intervalle(rng, previsions):
+    """Décale quelques prévisions de test à l'horizon 1 pour que le réel sorte de l'IC 95 %.
+
+    Le décalage est appliqué aux 3 modèles pour la même série et la même date
     cible, afin que l'alerte apparaisse quel que soit le modèle retenu.
     Retourne les prévisions modifiées et la liste des (serie, date_cible) visées.
     """
     visees = []
-    h1 = previsions[previsions["horizon"] == config.HORIZON_ALERTE]
+    h1 = previsions[(previsions["horizon"] == config.HORIZON_ALERTE)
+                    & (previsions["periode"] == config.PERIODE_RAPPORT)]
     for serie, g in h1.groupby("serie"):
         cibles = g["date_cible"].drop_duplicates()
         choix = rng.choice(cibles.to_numpy(), size=min(NB_HORS_INTERVALLE_PAR_SERIE, len(cibles)),
@@ -94,7 +105,8 @@ def forcer_hors_intervalle(rng, previsions):
         for cible in choix:
             signe = rng.choice([-1, 1])
             masque = (previsions["serie"] == serie) & (previsions["date_cible"] == cible) \
-                & (previsions["horizon"] == config.HORIZON_ALERTE)
+                & (previsions["horizon"] == config.HORIZON_ALERTE) \
+                & (previsions["periode"] == config.PERIODE_RAPPORT)
             for indice in previsions.index[masque]:
                 ligne = previsions.loc[indice]
                 log_prevision = np.log(ligne["reel"]) - signe * 1.5 * Z95 * ligne["sigma"]
@@ -113,25 +125,31 @@ def mettre_en_forme(previsions, colonnes):
         sortie[colonne] = pd.to_datetime(sortie[colonne]).dt.strftime("%Y-%m-01")
     colonnes_prix = [c for c in ["prevision", "inf80", "sup80", "inf95", "sup95", "reel"] if c in sortie]
     sortie[colonnes_prix] = sortie[colonnes_prix].round(2)
-    return sortie.sort_values(["serie", "modele", "date_origine", "horizon"]).reset_index(drop=True)
+    tri = [c for c in ["serie", "modele", "periode", "date_cible", "horizon"] if c in sortie]
+    return sortie.sort_values(tri).reset_index(drop=True)
 
 
 def generer(series, rng):
     """Retourne (previsions, previsions_futures, metriques, tests_dm, visees)."""
     lignes, lignes_futures = [], []
+    paires = paires_a_evaluer()
     for serie, s in series.groupby("serie"):
         prix_par_date = s.set_index("date")["prix"]
         avant_test = prix_par_date[prix_par_date.index < config.DATE_DEBUT_TEST]
         sigma_mensuel = np.log(avant_test).diff().std()
 
-        origines = prix_par_date.index[prix_par_date.index >= config.DATE_DEBUT_TEST]
-        for origine in origines:
-            lignes += prevoir(rng, serie, origine, prix_par_date[origine], sigma_mensuel,
-                              True, prix_par_date)
+        for paire in paires.itertuples():
+            nouvelles = prevoir(rng, serie, paire.date_origine, paire.date_cible, paire.horizon,
+                                paire.pas, prix_par_date[paire.date_origine], sigma_mensuel)
+            for ligne in nouvelles:
+                ligne["periode"] = paire.periode
+                ligne["reel"] = prix_par_date[paire.date_cible]
+            lignes += nouvelles
 
         derniere = prix_par_date.index.max()
-        lignes_futures += prevoir(rng, serie, derniere, prix_par_date[derniere], sigma_mensuel,
-                                  False, prix_par_date)
+        for horizon, pas in config.PAS_PAR_HORIZON.items():
+            lignes_futures += prevoir(rng, serie, derniere, derniere + pd.DateOffset(months=pas),
+                                      horizon, pas, prix_par_date[derniere], sigma_mensuel)
 
     previsions = pd.DataFrame(lignes)
     previsions, visees = forcer_hors_intervalle(rng, previsions)

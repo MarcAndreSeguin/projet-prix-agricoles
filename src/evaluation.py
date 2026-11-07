@@ -7,7 +7,10 @@ Conventions :
   où h est le nombre de pas entre l'origine et la cible, et la correction de
   Harvey, Leybourne et Newbold (1997) avec une loi de Student à n - 1 degrés de liberté ;
 - stat_dm < 0 signifie que modele_a a une perte moyenne plus faible que modele_b ;
-- meilleur vaut le modèle à plus faible perte si p_valeur < config.SEUIL_DM, sinon « aucun ».
+- meilleur vaut le modèle à plus faible perte si p_valeur < config.SEUIL_DM, sinon « aucun » ;
+- métriques et tests sont calculés séparément pour chaque période (colonne periode :
+  validation ou test), sans jamais mélanger les deux ; la règle du modèle final
+  s'applique sur config.PERIODE_SELECTION (validation).
 """
 
 from itertools import combinations
@@ -63,8 +66,18 @@ def origines_a_estimer(debut, fin, horizons=config.HORIZONS):
     return sorted(generer_paires_origine_cible(debut, fin, horizons)["date_origine"].unique())
 
 
+def _exiger_periode(previsions):
+    """Lève ValueError si la colonne periode est absente ou contient une valeur inconnue."""
+    if "periode" not in previsions:
+        raise ValueError("previsions doit contenir la colonne periode (validation ou test)")
+    inconnues = set(previsions["periode"].dropna()) - set(config.PERIODES_RESULTATS)
+    if inconnues or previsions["periode"].isna().any():
+        raise ValueError(f"Valeurs de periode non conformes : {sorted(inconnues) or 'manquantes'}")
+
+
 def calculer_metriques(previsions):
-    """Calcule les métriques par modèle, série et horizon (format de metriques.csv)."""
+    """Calcule les métriques par modèle, série, période et horizon (format de metriques.csv)."""
+    _exiger_periode(previsions)
     p = previsions.dropna(subset=["reel"]).copy()
     p["erreur"] = p["reel"] - p["prevision"]
     p["dans80"] = (p["reel"] >= p["inf80"]) & (p["reel"] <= p["sup80"])
@@ -82,7 +95,7 @@ def calculer_metriques(previsions):
         })
 
     metriques = (
-        p.groupby(["modele", "serie", "horizon"])[["erreur", "reel", "dans80", "dans95"]]
+        p.groupby(["modele", "serie", "periode", "horizon"])[["erreur", "reel", "dans80", "dans95"]]
         .apply(resumer)
         .reset_index()
     )
@@ -115,22 +128,25 @@ def test_diebold_mariano(erreurs_a, erreurs_b, pas):
     return float(stat), float(p_valeur)
 
 
-def choisir_modele_final(metriques, tests_dm, serie):
-    """Applique la règle de sélection du protocole à une série.
+def choisir_modele_final(metriques, tests_dm, serie, periode=config.PERIODE_SELECTION):
+    """Applique la règle de sélection du protocole à une série, sur une seule période.
 
-    Modèle final : plus faible MAE moyenne sur les 3 horizons, à condition de
-    battre le naïf (Diebold-Mariano, 5 %). Interprétation retenue :
+    Modèle final : plus faible MAE moyenne sur les horizons, à condition de
+    battre le naïf (Diebold-Mariano, 5 %), calculée sur la période de validation
+    (config.PERIODE_SELECTION) ; le test ne sert qu'à rapporter les performances.
+    Interprétation retenue :
     - les candidats sont classés par MAE moyenne croissante ;
     - un candidat est retenu si sa MAE moyenne est inférieure à celle du naïf et
       si le test DM contre le naïf le désigne meilleur sur au moins un horizon ;
     - si aucun candidat ne remplit ces conditions, le modèle final est le naïf.
-    Retourne None si les métriques de la série ou du naïf sont absentes.
+    Retourne None si les métriques de la série ou du naïf sont absentes pour cette période.
     """
     reference = config.MODELE_REFERENCE
-    mae_moyenne = metriques.loc[metriques["serie"] == serie].groupby("modele")["mae"].mean()
+    choisies = (metriques["serie"] == serie) & (metriques["periode"] == periode)
+    mae_moyenne = metriques.loc[choisies].groupby("modele")["mae"].mean()
     if reference not in mae_moyenne:
         return None
-    tests = tests_dm.loc[tests_dm["serie"] == serie]
+    tests = tests_dm.loc[(tests_dm["serie"] == serie) & (tests_dm["periode"] == periode)]
     for modele in mae_moyenne.sort_values().index:
         if modele == reference or mae_moyenne[modele] >= mae_moyenne[reference]:
             continue
@@ -144,11 +160,16 @@ def choisir_modele_final(metriques, tests_dm, serie):
 
 
 def calculer_tests_dm(previsions, modeles=config.MODELES):
-    """Compare chaque paire de modèles, par série et horizon (format de tests_dm.csv)."""
+    """Compare chaque paire de modèles, par série, période et horizon (format de tests_dm.csv).
+
+    Dans une période et un horizon donnés, chaque date d'origine correspond à une
+    seule date cible : les erreurs des deux modèles sont alignées sur date_origine.
+    """
+    _exiger_periode(previsions)
     p = previsions.dropna(subset=["reel"]).copy()
     p["erreur"] = p["reel"] - p["prevision"]
     lignes = []
-    for (serie, horizon), g in p.groupby(["serie", "horizon"]):
+    for (serie, periode, horizon), g in p.groupby(["serie", "periode", "horizon"]):
         erreurs = g.pivot(index="date_origine", columns="modele", values="erreur")
         pas = config.PAS_PAR_HORIZON[horizon]
         for modele_a, modele_b in combinations(modeles, 2):
@@ -161,7 +182,7 @@ def calculer_tests_dm(previsions, modeles=config.MODELES):
             else:
                 meilleur = modele_a if stat < 0 else modele_b
             lignes.append({
-                "serie": serie, "horizon": horizon, "modele_a": modele_a,
+                "serie": serie, "periode": periode, "horizon": horizon, "modele_a": modele_a,
                 "modele_b": modele_b, "stat_dm": stat, "p_valeur": p_valeur,
                 "meilleur": meilleur,
             })

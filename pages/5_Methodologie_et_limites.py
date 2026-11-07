@@ -185,10 +185,16 @@ correction de Harvey, Leybourne et Newbold, seuil de 5 %).
 
 **Intervalles** : 80 % pour l'affichage, 95 % pour les alertes.
 
-**Choix du modèle final**, pour chaque série : plus faible MAE moyenne sur les 3 horizons, à
-condition de battre le modèle naïf. Un modèle est retenu si sa MAE moyenne est inférieure à
-celle du naïf et si le test de Diebold-Mariano le désigne meilleur que le naïf (5 %) sur au
-moins un horizon ; sinon, le modèle naïf est retenu.
+**Choix du modèle final**, pour chaque série, sur la période de validation uniquement : plus
+faible MAE moyenne sur les horizons, à condition de battre le modèle naïf. Un modèle est retenu
+si sa MAE moyenne est inférieure à celle du naïf et si le test de Diebold-Mariano le désigne
+meilleur que le naïf (5 %) sur au moins un horizon ; sinon, le modèle naïf est retenu. Les
+performances sont rapportées sur la période de test ; les métriques et les tests sont calculés
+séparément pour chaque période.
+
+**Prévision en dollars** : les modèles prévoient le logarithme du prix ; l'exponentielle de la
+prévision correspond à la médiane du prix prévu (et non à sa moyenne). Les bornes des
+intervalles restent des quantiles du prix.
 
 **Alerte** : prix observé hors de l'intervalle à 95 % de la prévision à l'horizon
 {config.LIBELLES_HORIZONS[config.HORIZON_ALERTE]}.

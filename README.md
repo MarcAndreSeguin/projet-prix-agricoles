@@ -15,7 +15,7 @@ L'application Streamlit est entièrement en français. Elle ne calcule aucun mod
 - **Comparaison des modèles** : MAE, RMSE et MAPE par horizon, tests de Diebold-Mariano, couverture réelle des intervalles contre la couverture visée, prévisions contre valeurs réelles sur la période de test.
 - **Méthodologie et limites** : source et licence des données, définition des séries, prétraitement (contrôles, valeur estimée, statistiques descriptives), protocole d'évaluation.
 
-Un panneau latéral commun (produit, province, modèle, niveau d'intervalle) conserve les choix d'une page à l'autre. Le modèle proposé par défaut est le modèle final de la série, selon la règle du protocole. Un bandeau d'avertissement s'affiche tant que les résultats sont factices (présence de `resultats/FACTICE.txt`).
+Un panneau latéral commun (produit, province, modèle, niveau d'intervalle) conserve les choix d'une page à l'autre. Le modèle proposé par défaut est le modèle final de la série, selon la règle du protocole. Un bandeau d'avertissement s'affiche tant que les résultats sont factices (présence de `resultats/FACTICE.txt`) ; sinon, un bandeau d'information indique les modèles évalués et ceux qui ne sont pas encore disponibles. Les pages Alertes et Comparaison des modèles proposent la période de test (par défaut) ou la période de validation.
 
 ## Prérequis
 
@@ -37,6 +37,38 @@ Commande unique :
 ```bat
 streamlit run app.py
 ```
+
+## Chaîne complète
+
+Depuis la racine du dépôt, avec l'environnement virtuel activé :
+
+```bat
+python scripts\preparer_donnees.py
+python scripts\executer_evaluation.py
+streamlit run app.py
+```
+
+1. `preparer_donnees.py` : `data/mais.csv` et `data/canola.csv` → `data/series.csv` (détails ci-dessous).
+2. `executer_evaluation.py` : `data/series.csv` → les quatre fichiers de `resultats/`.
+3. `streamlit run app.py` : l'application lit `data/series.csv` et `resultats/`.
+
+## Tests
+
+```bat
+python -m pytest
+```
+
+Les tests (`tests/`) vérifient le modèle naïf (ordre des bornes, élargissement avec le pas, absence de fuite d'information, entrées invalides), le découpage (aucune cible de validation dans le test), la conformité des fichiers de `resultats/` au contrat, la séparation des périodes dans les métriques et le choix du modèle final sur la validation. Ils n'écrivent aucun fichier.
+
+## Ajouter un modèle
+
+1. Dans `src/modeles/<modele>.py` (`ets.py` ou `sarima.py`), écrire la fonction `prevoir(historique, pas)` selon l'interface commune de `docs/protocole.md` :
+   - `historique` : log des prix d'une série (`pd.Series`, index mensuel), connu jusqu'à l'origine seulement ;
+   - `pas` : liste des nombres de pas après la dernière donnée (3, 5, 8) ;
+   - retour : un `pd.DataFrame`, une ligne par pas, colonnes `pas, prevision, inf80, sup80, inf95, sup95`, en log.
+   `src/modeles/naif.py` sert d'exemple.
+2. Relancer l'évaluation : `python scripts\executer_evaluation.py` (ou `--modeles naif ets` pour choisir).
+3. Relancer `python -m pytest`, puis `streamlit run app.py` : le nouveau modèle apparaît dans le panneau latéral et dans les comparaisons, et la règle du modèle final en tient compte.
 
 ## Régénérer les données et les résultats
 
@@ -73,19 +105,22 @@ Le script garde les 4 séries à partir de 1985-01, estime la valeur manquante d
 
 ### 2. Résultats : `resultats/`
 
-Évaluation réelle des modèles (**à venir** : le script ne contient pour l'instant qu'une docstring) :
+Évaluation réelle des modèles, sur les six blocs de validation et le test final (origine glissante, modèle réestimé à chaque origine) :
 
 ```bat
 python scripts\executer_evaluation.py
+python scripts\executer_evaluation.py --modeles naif
 ```
 
-En développement, des résultats factices au format du contrat peuvent être générés à partir des vraies séries. Ils créent `resultats/FACTICE.txt`, qui déclenche le bandeau d'avertissement dans l'application :
+Le script exécute chaque modèle de `src/modeles/` dont la fonction `prevoir()` est écrite (interface commune de `docs/protocole.md`) et ignore les autres avec un message. Il écrit les quatre fichiers de `resultats/` (avec la colonne `periode` : validation ou test) et supprime `resultats/FACTICE.txt` si l'exécution réussit. Pour ajouter un modèle, il suffit d'écrire sa fonction `prevoir()` et de relancer le script.
+
+**Outil de développement** : `scripts\generer_resultats_factices.py` génère des résultats aléatoires au format du contrat (périodes de validation et de test, trois modèles), pour tester l'interface sans modèles réels. Il crée `resultats/FACTICE.txt`, qui déclenche le bandeau d'avertissement. Ces résultats n'ont aucune valeur d'analyse.
 
 ```bat
 python scripts\generer_resultats_factices.py
 ```
 
-Ce script refuse d'écraser des résultats réels (dossier sans `FACTICE.txt`), sauf avec l'option `--forcer`.
+Ce script refuse d'écraser des résultats réels (dossier sans `FACTICE.txt`), sauf avec l'option `--forcer`. Après l'avoir utilisé, relancer `executer_evaluation.py` pour revenir aux résultats réels.
 
 ## Structure du dépôt
 
@@ -105,8 +140,9 @@ src/
   modeles/                      naif.py, ets.py, sarima.py
 scripts/
   preparer_donnees.py           data/mais.csv + data/canola.csv -> data/series.csv (reproduit le notebook)
-  executer_evaluation.py        évaluation sur le découpage commun -> resultats/ (à venir)
-  generer_resultats_factices.py résultats factices pour le développement
+  executer_evaluation.py        évaluation sur le découpage commun -> resultats/
+  generer_resultats_factices.py résultats factices (outil de développement)
+tests/                          test_naif.py, test_evaluation.py (pytest)
 data/
   mais.csv, canola.csv          fichiers sources extraits de Statistique Canada
   series.csv                    séries au format long (généré)
@@ -115,6 +151,8 @@ docs/protocole.md               protocole et contrat des fichiers
 notebooks/                      01_pretraitement.ipynb (prétraitement de référence)
 rapport/figures/                figures du rapport
 requirements.txt                dépendances (versions figées)
+pytest.ini                      configuration des tests
+.streamlit/config.toml          configuration de Streamlit (statistiques d'usage désactivées)
 ```
 
 ## Données

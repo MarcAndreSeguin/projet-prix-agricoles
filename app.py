@@ -81,7 +81,7 @@ for produit, provinces in config.PROVINCES_PAR_PRODUIT.items():
                 st.markdown("Alerte : indisponible (aucun résultat)")
             elif serie in set(en_cours["serie"]):
                 sens = en_cours.loc[en_cours["serie"] == serie, "sens"].iloc[0]
-                st.markdown(f":red[**⚠ Alerte** : prix {sens} de l'intervalle à 95 %]")
+                st.markdown(f":red[**⚠ Alerte** : prix {sens} de l'intervalle à {ic.NIVEAU_ALERTE_PCT} %]")
             else:
                 st.markdown("✓ Aucune alerte")
 
@@ -93,7 +93,7 @@ if alertes is None:
     st.caption("Aucun résultat de prévision disponible dans resultats/.")
 else:
     st.caption(
-        f"Prix observé hors de l'intervalle à 95 % de la prévision à l'horizon "
+        f"Prix observé hors de l'intervalle à {ic.NIVEAU_ALERTE_PCT} % de la prévision à l'horizon "
         f"{config.HORIZON_ALERTE} mois, selon le modèle final de chaque série."
     )
     debut_12_mois = derniere_date - pd.DateOffset(months=11)
@@ -110,8 +110,9 @@ else:
             "Mois": en_cours["date_cible"].map(ic.formater_mois),
             "Modèle": en_cours["modele"].map(ic.libelle_modele),
             "Prix observé": en_cours["reel"].map(ic.formater_prix),
-            "Intervalle à 95 %": [f"{ic.formater_prix(a)} – {ic.formater_prix(b)}"
-                                  for a, b in zip(en_cours["inf95"], en_cours["sup95"])],
+            f"Intervalle à {ic.NIVEAU_ALERTE_PCT} %": [
+                f"{ic.formater_prix(a)} – {ic.formater_prix(b)}"
+                for a, b in zip(en_cours[ic.INF_ALERTE], en_cours[ic.SUP_ALERTE])],
             "Sens": en_cours["sens"],
             "Écart à la borne": en_cours["ecart_pct"].map(ic.formater_pct),
         })

@@ -8,7 +8,8 @@ from src import config
 def charger_series(chemin=None):
     """Lit data/series.csv et retourne un DataFrame au format long du contrat.
 
-    Colonnes : date (datetime64, premier du mois), serie, produit, province, prix.
+    Colonnes : date (datetime64, premier du mois), serie, produit, province, prix,
+    prix_impute.
     Les lignes sont triées par série puis par date.
     """
     chemin = chemin or config.FICHIER_SERIES
@@ -45,15 +46,29 @@ def charger_resultat(nom):
     """Lit un fichier de resultats/ et vérifie que ses colonnes sont celles du contrat.
 
     nom : « previsions », « previsions_futures », « metriques » ou « tests_dm ».
+    Vérifie aussi que la colonne periode, si elle existe, ne contient que les
+    valeurs de config.PERIODES_RESULTATS.
     """
     _, colonnes, colonnes_dates = RESULTATS[nom]
     chemin = chemin_resultat(nom)
     if not chemin.exists():
         raise FileNotFoundError(f"Fichier introuvable : {chemin}")
     tableau = pd.read_csv(chemin, parse_dates=colonnes_dates, encoding="utf-8")
+    verifier_colonnes(tableau, colonnes, chemin.name)
+    return tableau
+
+
+def verifier_colonnes(tableau, colonnes, nom_fichier):
+    """Lève ValueError si les colonnes ou les valeurs de periode ne respectent pas le contrat."""
     if list(tableau.columns) != colonnes:
         raise ValueError(
-            f"Colonnes de {chemin.name} non conformes au contrat : "
+            f"Colonnes de {nom_fichier} non conformes au contrat : "
             f"{list(tableau.columns)} au lieu de {colonnes}"
         )
-    return tableau
+    if "periode" in tableau:
+        inconnues = set(tableau["periode"].dropna()) - set(config.PERIODES_RESULTATS)
+        if inconnues or tableau["periode"].isna().any():
+            raise ValueError(
+                f"Valeurs de periode non conformes dans {nom_fichier} : "
+                f"{sorted(inconnues) or 'valeurs manquantes'} (attendu : {config.PERIODES_RESULTATS})"
+            )

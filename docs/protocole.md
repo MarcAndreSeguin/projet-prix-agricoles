@@ -23,15 +23,16 @@ Données : Statistique Canada, tableau 32-10-0077-01 (prix des produits agricole
 - Délai de publication : environ 2 mois. Horizons « consultation » 1, 3, 6 mois = 3, 5, 8 pas après la dernière donnée. Les mois de validation et de test étant des mois cibles, chaque horizon est évalué sur les mêmes 12 mois par période (les origines à 8 pas commencent 8 mois avant la période).
 - Métriques : MAE, RMSE, MAPE par horizon ; test de Diebold-Mariano ; taux de couverture des intervalles
 - Intervalles : 80 % (affichage), 95 % (alertes)
-- Modèle final : plus faible MAE moyenne sur les horizons, à condition de battre le naïf (Diebold-Mariano, 5 %)
+- Modèle final : plus faible MAE moyenne sur les horizons, à condition de battre le naïf (Diebold-Mariano, 5 %) ; règle appliquée sur la période de validation uniquement, performances rapportées sur le test (**Proposition – à valider par l'équipe**)
 - Alerte : prix observé hors de l'intervalle à 95 % de la prévision à l'horizon 1
 
 ## Contrat des fichiers (ne pas modifier sans accord de l'équipe)
 - data/series.csv : date (AAAA-MM-01), serie, produit, province, prix, prix_impute (True si la valeur est estimée)
-- resultats/previsions.csv : serie, modele, date_origine, date_cible, horizon, prevision, inf80, sup80, inf95, sup95, reel
-- resultats/previsions_futures.csv : mêmes colonnes sans reel, date_origine = dernière donnée
-- resultats/metriques.csv : modele, serie, horizon, mae, rmse, mape, couverture80, couverture95, n
-- resultats/tests_dm.csv : serie, horizon, modele_a, modele_b, stat_dm, p_valeur, meilleur
+- resultats/previsions.csv : serie, modele, periode, date_origine, date_cible, horizon, prevision, inf80, sup80, inf95, sup95, reel
+- resultats/previsions_futures.csv : mêmes colonnes sans periode ni reel, date_origine = dernière donnée
+- resultats/metriques.csv : modele, serie, periode, horizon, mae, rmse, mape, couverture80, couverture95, n
+- resultats/tests_dm.csv : serie, periode, horizon, modele_a, modele_b, stat_dm, p_valeur, meilleur
+- Colonne periode (**Proposition – à valider par l'équipe**) : « validation » (mois cibles des six blocs de validation) ou « test » (mois cibles du test final). Les métriques et les tests de Diebold-Mariano sont calculés séparément pour chaque période, sans jamais les mélanger. La règle du modèle final est appliquée sur la période de validation uniquement ; les performances sont rapportées sur le test.
 - date_origine = dernier mois de données connu ; horizon ∈ {1, 3, 6}
 - Valeurs de modele : naif, ets, sarima
 - Valeurs de serie : mais_QC, mais_ON, canola_SK, canola_AB

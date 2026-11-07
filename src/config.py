@@ -132,17 +132,24 @@ SEUIL_DM = 0.05
 # Colonnes des fichiers (contrat)
 # ---------------------------------------------------------------------------
 COLONNES_SERIES = ["date", "serie", "produit", "province", "prix", "prix_impute"]
+# Colonne periode (PROPOSITION – À VALIDER PAR L'ÉQUIPE) : sépare les erreurs de
+# validation (choix du modèle final) et de test (performances rapportées) dans
+# previsions.csv, metriques.csv et tests_dm.csv. Les deux périodes ne sont
+# jamais mélangées dans un calcul.
+PERIODES_RESULTATS = ["validation", "test"]
+PERIODE_SELECTION = "validation"  # période sur laquelle la règle du modèle final est appliquée
+PERIODE_RAPPORT = "test"          # période sur laquelle les performances sont rapportées
 COLONNES_PREVISIONS = [
-    "serie", "modele", "date_origine", "date_cible", "horizon",
+    "serie", "modele", "periode", "date_origine", "date_cible", "horizon",
     "prevision", "inf80", "sup80", "inf95", "sup95", "reel",
 ]
-COLONNES_PREVISIONS_FUTURES = [c for c in COLONNES_PREVISIONS if c != "reel"]
+COLONNES_PREVISIONS_FUTURES = [c for c in COLONNES_PREVISIONS if c not in ("periode", "reel")]
 COLONNES_METRIQUES = [
-    "modele", "serie", "horizon", "mae", "rmse", "mape",
+    "modele", "serie", "periode", "horizon", "mae", "rmse", "mape",
     "couverture80", "couverture95", "n",
 ]
 COLONNES_TESTS_DM = [
-    "serie", "horizon", "modele_a", "modele_b", "stat_dm", "p_valeur", "meilleur",
+    "serie", "periode", "horizon", "modele_a", "modele_b", "stat_dm", "p_valeur", "meilleur",
 ]
 
 # ---------------------------------------------------------------------------

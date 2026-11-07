@@ -1,5 +1,6 @@
 """Page Comparaison des modèles : métriques par horizon, couverture des intervalles et
-tests de Diebold-Mariano, pour la série choisie.
+tests de Diebold-Mariano, pour la série choisie et une période (test par défaut, ou
+validation, où le modèle final est choisi). Les deux périodes ne sont jamais mélangées.
 
 - tableau des métriques (MAE, RMSE, MAPE) par modèle et par horizon, meilleure valeur mise en évidence ;
 - tableau des tests de Diebold-Mariano ;
@@ -22,14 +23,23 @@ selection = ic.panneau_lateral(avec_modele=False, avec_niveau=False)
 libelle = ic.libelle_serie(selection.serie)
 
 st.title("Comparaison des modèles")
-m = metriques[metriques["serie"] == selection.serie]
+PERIODES = {
+    "test": f"Test ({ic.formater_mois(config.DATE_DEBUT_TEST)} à "
+            f"{ic.formater_mois(config.DATE_FIN_TEST)})",
+    "validation": f"Validation ({len(config.PERIODES_VALIDATION)} blocs, "
+                  f"{ic.formater_mois(config.PERIODES_VALIDATION[0][0])} à "
+                  f"{ic.formater_mois(config.PERIODES_VALIDATION[-1][1])})",
+}
+periode = st.radio("Période évaluée", list(PERIODES), format_func=PERIODES.get, horizontal=True,
+                   key="comparaison_periode")
+m = metriques[(metriques["serie"] == selection.serie) & (metriques["periode"] == periode)]
 if m.empty:
-    st.error(f"Aucune métrique pour {libelle} dans resultats/metriques.csv.")
+    st.error(f"Aucune métrique pour {libelle} sur cette période dans resultats/metriques.csv.")
     st.stop()
 modeles = [x for x in config.MODELES if x in set(m["modele"])]
 final = selection.modele_final
-st.caption(f"{libelle} – période de test par origine glissante à partir de "
-           f"{ic.formater_mois(config.DATE_DEBUT_TEST)} – modèle final : "
+st.caption(f"{libelle} – {PERIODES[periode]}, mois cibles prévus par origine glissante – "
+           f"modèle final (choisi sur la validation) : "
            f"{ic.libelle_modele(final) if final else 'indéterminé'}")
 
 
@@ -63,7 +73,8 @@ st.caption(f"Meilleure valeur (la plus faible) de chaque colonne en gras sur fon
 # Tests de Diebold-Mariano
 # ---------------------------------------------------------------------------
 st.header("Tests de Diebold-Mariano")
-d = tests_dm[tests_dm["serie"] == selection.serie].sort_values(["horizon", "modele_a", "modele_b"])
+d = tests_dm[(tests_dm["serie"] == selection.serie) & (tests_dm["periode"] == periode)]
+d = d.sort_values(["horizon", "modele_a", "modele_b"])
 seulement_naif = st.checkbox("Afficher seulement les comparaisons avec le modèle naïf",
                              key="comparaison_naif")
 if seulement_naif:
@@ -77,7 +88,10 @@ tableau_dm = pd.DataFrame({
     "Significatif (5 %)": (d["p_valeur"] < config.SEUIL_DM).map({True: "Oui", False: "Non"}),
     "Meilleur": d["meilleur"].map(lambda x: "aucun" if x == "aucun" else ic.libelle_modele(x)),
 })
-st.dataframe(tableau_dm, hide_index=True, use_container_width=True)
+if d.empty:
+    st.caption("Aucun test : au moins deux modèles sont nécessaires.")
+else:
+    st.dataframe(tableau_dm, hide_index=True, use_container_width=True)
 st.caption("Perte absolue, correction de Harvey, Leybourne et Newbold. Statistique négative : "
            "le modèle A a une erreur absolue moyenne plus faible que le modèle B.")
 
@@ -107,14 +121,14 @@ st.caption("Couverture réelle : proportion des prix observés situés dans l'in
 # ---------------------------------------------------------------------------
 # Prévisions contre valeurs réelles
 # ---------------------------------------------------------------------------
-st.header("Prévisions et valeurs réelles sur la période de test")
+st.header("Prévisions et valeurs réelles sur la période évaluée")
 c1, c2 = st.columns([1, 2])
 horizon = c1.radio("Horizon", config.HORIZONS, format_func=config.LIBELLES_HORIZONS.get,
                    horizontal=True, key="comparaison_horizon")
 modeles_affiches = c2.multiselect("Modèles", modeles, default=modeles,
                                   format_func=ic.libelle_modele, key="comparaison_modeles")
 p = previsions[(previsions["serie"] == selection.serie) & (previsions["horizon"] == horizon)
-               & previsions["reel"].notna()]
+               & (previsions["periode"] == periode) & previsions["reel"].notna()]
 ic.afficher_graphique(ic.graphique_previsions_reel(p, modeles_affiches))
 st.caption(f"Chaque point est la prévision faite {config.PAS_PAR_HORIZON[horizon]} mois avant la "
            "date cible (horizon de consultation "

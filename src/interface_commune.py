@@ -103,14 +103,19 @@ def colonnes_intervalle(niveau):
     return f"inf{niveau}", f"sup{niveau}"
 
 
+# Niveau de l'intervalle des alertes, en pourcentage (95 avec config.NIVEAU_ALERTE = 0,95)
+NIVEAU_ALERTE_PCT = int(round(config.NIVEAU_ALERTE * 100))
+INF_ALERTE, SUP_ALERTE = colonnes_intervalle(NIVEAU_ALERTE_PCT)
+
+
 # ---------------------------------------------------------------------------
 # Page et bandeau
 # ---------------------------------------------------------------------------
 def configurer_page(titre):
     """Configure la page (titre d'onglet, mise en page large) et affiche le bandeau
-    des résultats factices. Doit être appelée en premier dans chaque page."""
+    d'état des résultats. Doit être appelée en premier dans chaque page."""
     st.set_page_config(page_title=f"{titre} – Prix agricoles", layout="wide")
-    afficher_bandeau_factice()
+    afficher_bandeau()
 
 
 def resultats_factices():
@@ -118,8 +123,14 @@ def resultats_factices():
     return (config.DOSSIER_RESULTATS / FICHIER_FACTICE).exists()
 
 
-def afficher_bandeau_factice():
-    """Affiche un avertissement si les résultats sont factices."""
+def afficher_bandeau():
+    """Affiche l'état des résultats en haut de chaque page.
+
+    - resultats/FACTICE.txt présent : avertissement « Résultats factices » ;
+    - sinon, si des résultats existent : bandeau d'information listant les modèles
+      évalués et ceux qui ne sont pas encore disponibles ;
+    - sans résultats : rien (les pages concernées affichent leur propre message).
+    """
     if resultats_factices():
         st.warning(
             "**Résultats factices.** Les prévisions, métriques et alertes affichées "
@@ -127,6 +138,15 @@ def afficher_bandeau_factice():
             "Elles ne doivent pas être utilisées pour l'analyse.",
             icon="⚠️",
         )
+        return
+    evalues = modeles_disponibles()
+    if not evalues:
+        return
+    absents = [modele for modele in config.MODELES if modele not in evalues]
+    texte = "Modèles évalués : " + ", ".join(libelle_modele(m) for m in evalues) + "."
+    if absents:
+        texte += " Pas encore disponibles : " + ", ".join(libelle_modele(m) for m in absents) + "."
+    st.info(texte, icon="ℹ️")
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +212,10 @@ def exiger_resultat(nom):
 
 
 def modeles_finaux():
-    """Retourne {série: modèle final} selon la règle du protocole, ou {} sans résultats."""
+    """Retourne {série: modèle final} selon la règle du protocole, ou {} sans résultats.
+
+    La règle est appliquée sur la période de validation (config.PERIODE_SELECTION).
+    """
     metriques = lire_resultat("metriques")
     tests_dm = lire_resultat("tests_dm")
     if metriques is None or tests_dm is None:
@@ -203,6 +226,18 @@ def modeles_finaux():
         if modele is not None:
             finaux[serie] = modele
     return finaux
+
+
+def modeles_disponibles():
+    """Modèles présents dans metriques.csv, dans l'ordre de config.MODELES ([] sans résultats).
+
+    Les modèles qui n'ont pas encore été exécutés ne sont pas proposés.
+    """
+    metriques = lire_resultat("metriques")
+    if metriques is None:
+        return []
+    presents = set(metriques["modele"])
+    return [modele for modele in config.MODELES if modele in presents]
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +281,7 @@ def panneau_lateral(avec_modele=True, avec_niveau=True):
 
     Le modèle proposé par défaut est le modèle final de la série choisie
     (règle du protocole, calculée à partir de metriques.csv et tests_dm.csv).
+    Seuls les modèles présents dans les résultats sont proposés.
     """
     barre = st.sidebar
     barre.header("Sélection")
@@ -267,7 +303,7 @@ def panneau_lateral(avec_modele=True, avec_niveau=True):
         if modele_final is None:
             barre.caption("Modèle : aucun résultat disponible.")
         else:
-            options = [MODELE_FINAL] + config.MODELES
+            options = [MODELE_FINAL] + modeles_disponibles()
 
             def libeller(option):
                 if option == MODELE_FINAL:
@@ -292,24 +328,26 @@ def panneau_lateral(avec_modele=True, avec_niveau=True):
 # ---------------------------------------------------------------------------
 # Alertes
 # ---------------------------------------------------------------------------
-def calculer_alertes(previsions, modeles_par_serie=None):
-    """Retourne les alertes : prix observé hors de l'intervalle à 95 % de la
-    prévision à l'horizon 1 (config.HORIZON_ALERTE).
+def calculer_alertes(previsions, modeles_par_serie=None, periode=config.PERIODE_RAPPORT):
+    """Retourne les alertes : prix observé hors de l'intervalle de niveau
+    config.NIVEAU_ALERTE (95 %) de la prévision à l'horizon 1 (config.HORIZON_ALERTE).
 
     modeles_par_serie : {série: modèle} pour ne garder qu'un modèle par série
     (par exemple le modèle final) ; None pour garder tous les modèles.
-    Colonnes ajoutées : sens (« au-dessus » ou « en dessous ») et ecart_pct,
-    écart relatif entre le prix observé et la borne franchie.
+    periode : période de previsions.csv à utiliser (le test par défaut).
+    Colonnes ajoutées : sens (« au-dessus » ou « en dessous »), borne (valeur de la
+    borne franchie) et ecart_pct, écart relatif entre le prix observé et cette borne.
     """
-    p = previsions[(previsions["horizon"] == config.HORIZON_ALERTE) & previsions["reel"].notna()]
+    p = previsions[(previsions["periode"] == periode)
+                   & (previsions["horizon"] == config.HORIZON_ALERTE) & previsions["reel"].notna()]
     if modeles_par_serie is not None:
         p = p[p["modele"] == p["serie"].map(modeles_par_serie)]
-    au_dessus = p["reel"] > p["sup95"]
-    en_dessous = p["reel"] < p["inf95"]
+    au_dessus = p["reel"] > p[SUP_ALERTE]
+    en_dessous = p["reel"] < p[INF_ALERTE]
     alertes = p[au_dessus | en_dessous].copy()
     alertes["sens"] = np.where(au_dessus[alertes.index], "au-dessus", "en dessous")
-    borne = np.where(alertes["sens"] == "au-dessus", alertes["sup95"], alertes["inf95"])
-    alertes["ecart_pct"] = alertes["reel"] / borne - 1
+    alertes["borne"] = np.where(alertes["sens"] == "au-dessus", alertes[SUP_ALERTE], alertes[INF_ALERTE])
+    alertes["ecart_pct"] = alertes["reel"] / alertes["borne"] - 1
     return alertes.sort_values(["date_cible", "serie", "modele"], ascending=[False, True, True])
 
 
