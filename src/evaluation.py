@@ -19,6 +19,50 @@ from scipy import stats
 from src import config
 
 
+def generer_paires_origine_cible(debut, fin, horizons=config.HORIZONS):
+    """Liste les prévisions à produire pour une période (validation ou test).
+
+    Origine glissante : chaque mois de debut à fin (inclus) est un mois cible,
+    prévu à chaque horizon depuis l'origine date_cible - PAS_PAR_HORIZON[horizon].
+    Le modèle est estimé sur les données jusqu'à date_origine incluse, puis
+    réestimé à l'origine suivante (config.REESTIMATION_A_CHAQUE_ORIGINE).
+
+    Retourne un DataFrame trié (date_origine, date_cible, horizon, pas).
+    Exemple : cible 2023-01, horizon 6 (8 pas) -> origine 2022-05.
+    """
+    cibles = pd.date_range(debut, fin, freq="MS")
+    lignes = [
+        {
+            "date_origine": cible - pd.DateOffset(months=config.PAS_PAR_HORIZON[h]),
+            "date_cible": cible,
+            "horizon": h,
+            "pas": config.PAS_PAR_HORIZON[h],
+        }
+        for cible in cibles
+        for h in horizons
+    ]
+    paires = pd.DataFrame(lignes, columns=["date_origine", "date_cible", "horizon", "pas"])
+    return paires.sort_values(["date_origine", "date_cible"]).reset_index(drop=True)
+
+
+def numero_periode_validation(date_cible):
+    """Numéro (1 à len(PERIODES_VALIDATION)) du bloc de validation d'une date cible.
+
+    Retourne None si la date n'appartient à aucun bloc (par exemple le test).
+    Sert à rapporter les erreurs bloc par bloc, donc par régime de prix.
+    """
+    date_cible = pd.Timestamp(date_cible)
+    for numero, (debut, fin) in enumerate(config.PERIODES_VALIDATION, start=1):
+        if pd.Timestamp(debut) <= date_cible <= pd.Timestamp(fin):
+            return numero
+    return None
+
+
+def origines_a_estimer(debut, fin, horizons=config.HORIZONS):
+    """Origines distinctes d'une période : une estimation du modèle par origine."""
+    return sorted(generer_paires_origine_cible(debut, fin, horizons)["date_origine"].unique())
+
+
 def calculer_metriques(previsions):
     """Calcule les métriques par modèle, série et horizon (format de metriques.csv)."""
     p = previsions.dropna(subset=["reel"]).copy()

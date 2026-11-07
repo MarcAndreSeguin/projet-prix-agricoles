@@ -75,17 +75,35 @@ DATE_DEBUT = "1985-01-01"
 DATE_FIN = "2026-08-01"
 NB_MOIS_ATTENDU = 500
 
-# Découpage proposé dans notebooks/01_pretraitement.ipynb (À VALIDER PAR
-# L'ÉQUIPE) : trois validations de 12 mois avec entraînement croissant, puis
-# 12 mois de test final réservés, communs aux quatre séries et aux trois méthodes.
+# Découpage (À VALIDER PAR L'ÉQUIPE) : structure proposée dans
+# notebooks/01_pretraitement.ipynb (trois validations de 12 mois avec
+# entraînement croissant, puis test final réservé), avec un test allongé à
+# 36 mois (choix de Marc) pour que le test de Diebold-Mariano soit calculable
+# à tous les horizons (il exige au moins 2 * pas + 1 = 17 erreurs à 8 pas).
+# Six validations contiguës de 12 mois sur les six années précédant le test
+# (choix de Marc) pour couvrir plusieurs régimes de prix : stable (2017-2020),
+# flambée (2020-2022), sommet et début de baisse (2022-2023). Communs aux
+# quatre séries et aux trois méthodes.
 DATE_DEBUT_ENTRAINEMENT = "1985-01-01"
 PERIODES_VALIDATION = [
+    ("2017-09-01", "2018-08-01"),
+    ("2018-09-01", "2019-08-01"),
+    ("2019-09-01", "2020-08-01"),
+    ("2020-09-01", "2021-08-01"),
+    ("2021-09-01", "2022-08-01"),
     ("2022-09-01", "2023-08-01"),
-    ("2023-09-01", "2024-08-01"),
-    ("2024-09-01", "2025-08-01"),
 ]
-DATE_DEBUT_TEST = "2025-09-01"
+DATE_DEBUT_TEST = "2023-09-01"
 DATE_FIN_TEST = "2026-08-01"
+
+# Manière de parcourir chaque période (choix de Marc, À VALIDER PAR L'ÉQUIPE) :
+# origine glissante, modèle réestimé à chaque origine. Les mois des périodes
+# de validation et de test sont des mois CIBLES : chaque mois cible est prévu
+# à chaque horizon depuis l'origine date_cible - PAS_PAR_HORIZON[horizon].
+# Les origines peuvent donc précéder la période, mais aucune cible n'en sort
+# (pas de fuite d'une validation vers la suivante ni vers le test).
+MODE_ORIGINE = "glissante"
+REESTIMATION_A_CHAQUE_ORIGINE = True
 
 # ---------------------------------------------------------------------------
 # Horizons (À CONFIRMER PAR L'ÉQUIPE : repris de la première version du protocole)
