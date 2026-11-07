@@ -1,6 +1,6 @@
 """Page Historique : évolution des prix observés par série.
 
-- courbe des prix depuis 1992, avec comparaison entre provinces ou entre produits ;
+- courbe des prix depuis 1985, avec comparaison entre provinces ou entre toutes les séries ;
 - décomposition STL (tendance, saisonnalité, résidu) de la série choisie ;
 - profil saisonnier moyen (prix moyen par mois de l'année).
 
@@ -31,23 +31,24 @@ st.header("Évolution des prix")
 COMPARAISONS = {
     "aucune": "Série choisie seulement",
     "provinces": f"Entre provinces ({config.LIBELLES_PRODUITS[selection.produit]})",
-    "produits": f"Entre produits ({config.LIBELLES_PROVINCES[selection.province]})",
+    "toutes": "Toutes les séries",
 }
 comparaison = st.radio("Comparer", list(COMPARAISONS), format_func=COMPARAISONS.get,
                        horizontal=True, key="historique_comparaison")
 if comparaison == "provinces":
-    liste = [f"{selection.produit}_{p}" for p in config.LIBELLES_PROVINCES]
-elif comparaison == "produits":
-    liste = [f"{p}_{selection.province}" for p in config.LIBELLES_PRODUITS]
+    liste = [f"{selection.produit}_{p}" for p in config.PROVINCES_PAR_PRODUIT[selection.produit]]
+elif comparaison == "toutes":
+    liste = list(config.LISTE_SERIES)
 else:
     liste = [selection.serie]
 liste = [serie for serie in liste if serie in set(series["serie"])]
 
 ic.afficher_graphique(ic.graphique_comparaison(series, liste))
-signalees = [serie for serie in liste if serie in config.SERIES_DEFINITION_DIFFERENTE]
-if signalees:
-    st.caption(f"{', '.join(ic.libelle_serie(x) for x in signalees)} : définition différente "
-               "(« Ontario wheat excluding payments »).")
+if "prix_impute" in series and series.loc[series["serie"].isin(liste), "prix_impute"].any():
+    estimes = series[series["serie"].isin(liste) & series["prix_impute"]]
+    st.caption("Valeur estimée par interpolation linéaire (absente de la source) : "
+               + ", ".join(f"{ic.libelle_serie(r.serie)}, {ic.formater_mois(r.date)}"
+                           for r in estimes.itertuples()) + ".")
 
 # ---------------------------------------------------------------------------
 # Décomposition STL

@@ -30,12 +30,11 @@ COULEURS_MODELES = {
     "naif": "#666666",
     "ets": "#0072B2",
     "sarima": "#D55E00",
-    "gbm": "#009E73",
 }
-TRACES_MODELES = {"naif": "dot", "ets": "dash", "sarima": "dashdot", "gbm": "longdash"}
-# Courbes comparées (provinces ou produits), dans l'ordre d'affichage
-COULEURS_COMPARAISON = ["#000000", "#0072B2", "#D55E00"]
-TRACES_COMPARAISON = ["solid", "dash", "dot"]
+TRACES_MODELES = {"naif": "dot", "ets": "dash", "sarima": "dashdot"}
+# Courbes comparées (provinces ou toutes les séries), dans l'ordre d'affichage
+COULEURS_COMPARAISON = ["#000000", "#0072B2", "#D55E00", "#009E73"]
+TRACES_COMPARAISON = ["solid", "dash", "dot", "dashdot"]
 POLICE = "Source Sans Pro, Arial, sans-serif"
 
 MOIS_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
@@ -165,8 +164,8 @@ def exiger_series():
     series = lire_series()
     if series is None:
         st.error(
-            "Le fichier **data/series.csv** est introuvable. Placer le fichier brut "
-            "de Statistique Canada dans data/brut/, puis exécuter :\n\n"
+            "Le fichier **data/series.csv** est introuvable. Vérifier que "
+            "data/mais.csv et data/canola.csv sont présents, puis exécuter :\n\n"
             "`python scripts/preparer_donnees.py`"
         )
         st.stop()
@@ -245,15 +244,14 @@ def panneau_lateral(avec_modele=True, avec_niveau=True):
     barre = st.sidebar
     barre.header("Sélection")
 
-    produits = list(config.LIBELLES_PRODUITS)
-    provinces = list(config.LIBELLES_PROVINCES)
+    produits = list(config.PROVINCES_PAR_PRODUIT)
     produit = _widget_persistant(barre.selectbox, "produit", "Produit", produits, produits[0],
                                  format_func=config.LIBELLES_PRODUITS.get)
+    # Seules les provinces suivies pour ce produit sont proposées
+    provinces = config.PROVINCES_PAR_PRODUIT[produit]
     province = _widget_persistant(barre.selectbox, "province", "Province", provinces, provinces[0],
                                   format_func=config.LIBELLES_PROVINCES.get)
     serie = f"{produit}_{province}"
-    if serie in config.SERIES_DEFINITION_DIFFERENTE:
-        barre.caption("Définition différente : « Ontario wheat excluding payments ».")
 
     finaux = modeles_finaux()
     modele_final = finaux.get(serie)
@@ -449,7 +447,7 @@ def ajouter_selecteur_periode(figure):
 
 
 def graphique_comparaison(series, liste_series, titre=None, hauteur=480):
-    """Prix de plusieurs séries sur un même graphique (comparaison de provinces ou de produits).
+    """Prix de plusieurs séries sur un même graphique (comparaison de provinces ou de toutes les séries).
 
     series : DataFrame au format de data/series.csv.
     """

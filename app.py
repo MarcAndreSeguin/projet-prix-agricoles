@@ -1,6 +1,6 @@
 """Page d'accueil de l'application Streamlit (point d'entrée : streamlit run app.py).
 
-Tableau de bord : date de la dernière donnée, cartes des 6 séries (dernier prix,
+Tableau de bord : date de la dernière donnée, cartes des 4 séries (dernier prix,
 variations sur 1 et 12 mois, indicateur d'alerte) et résumé chiffré des alertes.
 """
 
@@ -15,7 +15,7 @@ series = ic.exiger_series()
 ic.panneau_lateral()
 
 st.title("Suivi et prévision des prix agricoles")
-st.caption(f"Maïs-grain, soya et blé au Québec et en Ontario – Statistique Canada, "
+st.caption(f"Maïs-grain (Québec, Ontario) et canola (Saskatchewan, Alberta) – Statistique Canada, "
            f"tableau {config.TABLEAU_STATCAN} ({config.UNITE_PRIX})")
 
 # ---------------------------------------------------------------------------
@@ -53,17 +53,17 @@ def variation(prix, mois):
 
 
 # ---------------------------------------------------------------------------
-# Cartes : une ligne par province, une colonne par produit
+# Cartes : une ligne par produit, une colonne par province suivie
 # ---------------------------------------------------------------------------
 st.markdown("## Situation par série")
-for province, libelle_province in config.LIBELLES_PROVINCES.items():
-    st.markdown(f"### {libelle_province}")
-    colonnes = st.columns(len(config.LIBELLES_PRODUITS))
-    for colonne, (produit, libelle_produit) in zip(colonnes, config.LIBELLES_PRODUITS.items()):
+for produit, provinces in config.PROVINCES_PAR_PRODUIT.items():
+    st.markdown(f"### {config.LIBELLES_PRODUITS[produit]}")
+    colonnes = st.columns(len(provinces))
+    for colonne, province in zip(colonnes, provinces):
         serie = f"{produit}_{province}"
         prix = series.loc[series["serie"] == serie].set_index("date")["prix"]
         with colonne.container(border=True):
-            st.markdown(f"**{libelle_produit}**")
+            st.markdown(f"**{config.LIBELLES_PROVINCES[province]}**")
             if prix.empty:
                 st.caption("Aucune donnée.")
                 continue
@@ -76,8 +76,6 @@ for province, libelle_province in config.LIBELLES_PROVINCES.items():
                 delta_color="off",
             )
             st.caption(f"Sur 12 mois : {ic.formater_pct(variation(prix, 12))}")
-            if serie in config.SERIES_DEFINITION_DIFFERENTE:
-                st.caption("Définition différente (« Ontario wheat excluding payments »).")
 
             if en_cours is None:
                 st.markdown("Alerte : indisponible (aucun résultat)")

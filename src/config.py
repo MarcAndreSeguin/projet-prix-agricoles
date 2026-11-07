@@ -11,11 +11,9 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 RACINE = Path(__file__).resolve().parent.parent
 DOSSIER_DATA = RACINE / "data"
-DOSSIER_BRUT = DOSSIER_DATA / "brut"
 DOSSIER_RESULTATS = RACINE / "resultats"
 DOSSIER_FIGURES = RACINE / "rapport" / "figures"
 
-FICHIER_BRUT = DOSSIER_BRUT / "32100077.csv"
 FICHIER_SERIES = DOSSIER_DATA / "series.csv"
 FICHIER_PREVISIONS = DOSSIER_RESULTATS / "previsions.csv"
 FICHIER_PREVISIONS_FUTURES = DOSSIER_RESULTATS / "previsions_futures.csv"
@@ -31,15 +29,27 @@ UNITE_PRIX = "$/tonne"
 # ---------------------------------------------------------------------------
 # Séries
 # ---------------------------------------------------------------------------
-# Correspondance série -> (nom du produit Statistique Canada sans le code
-# entre crochets, province telle qu'elle apparaît dans la colonne GEO).
+# Fichiers sources extraits du tableau 32-10-0077-01 (versionnés dans data/).
+# Ils sont encodés en cp1252, avec des dates au format mois/jour/année.
+FICHIERS_SOURCES = {
+    "mais": DOSSIER_DATA / "mais.csv",
+    "canola": DOSSIER_DATA / "canola.csv",
+}
+ENCODAGE_SOURCES = "cp1252"
+FORMAT_DATE_SOURCES = "%m/%d/%Y"
+UNITE_SOURCES = "Dollars par tonne métrique"
+
+# Correspondance série -> (culture et province telles qu'elles apparaissent
+# dans les fichiers sources, nom du produit dans le tableau de Statistique Canada).
 SERIES = {
-    "mais_QC": {"produit_statcan": "Corn for grain", "province": "Quebec"},
-    "mais_ON": {"produit_statcan": "Corn for grain", "province": "Ontario"},
-    "soya_QC": {"produit_statcan": "Soybeans", "province": "Quebec"},
-    "soya_ON": {"produit_statcan": "Soybeans", "province": "Ontario"},
-    "ble_QC": {"produit_statcan": "Wheat (except durum wheat)", "province": "Quebec"},
-    "ble_ON": {"produit_statcan": "Ontario wheat excluding payments", "province": "Ontario"},
+    "mais_QC": {"culture": "Maïs-grain", "province": "Québec",
+                "produit_statcan": "Maïs-grain"},
+    "mais_ON": {"culture": "Maïs-grain", "province": "Ontario",
+                "produit_statcan": "Maïs-grain"},
+    "canola_SK": {"culture": "Canola", "province": "Saskatchewan",
+                  "produit_statcan": "Canola (y compris le colza)"},
+    "canola_AB": {"culture": "Canola", "province": "Alberta",
+                  "produit_statcan": "Canola (y compris le colza)"},
 }
 LISTE_SERIES = list(SERIES)
 
@@ -47,22 +57,38 @@ LISTE_SERIES = list(SERIES)
 PRODUIT_PAR_SERIE = {serie: serie.split("_")[0] for serie in SERIES}
 PROVINCE_PAR_SERIE = {serie: serie.split("_")[1] for serie in SERIES}
 
-# Séries dont la définition diffère et doit être signalée à l'utilisateur
-SERIES_DEFINITION_DIFFERENTE = ["ble_ON"]
+# Provinces suivies pour chaque produit (le canola n'est pas suivi au Québec
+# ni en Ontario, le maïs-grain ne l'est pas dans les Prairies).
+PROVINCES_PAR_PRODUIT = {}
+for _serie in SERIES:
+    PROVINCES_PAR_PRODUIT.setdefault(PRODUIT_PAR_SERIE[_serie], []).append(PROVINCE_PAR_SERIE[_serie])
+
+# Valeurs manquantes connues dans les sources, estimées par interpolation
+# linéaire entre les deux mois voisins (notebooks/01_pretraitement.ipynb).
+# Toute autre valeur manquante fait échouer scripts/preparer_donnees.py.
+VALEURS_A_IMPUTER = [("canola_AB", "2012-05-01")]
 
 # ---------------------------------------------------------------------------
 # Période et découpage
 # ---------------------------------------------------------------------------
-DATE_DEBUT = "1992-01-01"
+DATE_DEBUT = "1985-01-01"
 DATE_FIN = "2026-08-01"
-NB_MOIS_ATTENDU = 416
+NB_MOIS_ATTENDU = 500
 
-DATE_DEBUT_ENTRAINEMENT = "1992-01-01"
-DATE_DEBUT_TEST = "2019-01-01"
+# Découpage proposé dans notebooks/01_pretraitement.ipynb (À VALIDER PAR
+# L'ÉQUIPE) : trois validations de 12 mois avec entraînement croissant, puis
+# 12 mois de test final réservés, communs aux quatre séries et aux trois méthodes.
+DATE_DEBUT_ENTRAINEMENT = "1985-01-01"
+PERIODES_VALIDATION = [
+    ("2022-09-01", "2023-08-01"),
+    ("2023-09-01", "2024-08-01"),
+    ("2024-09-01", "2025-08-01"),
+]
+DATE_DEBUT_TEST = "2025-09-01"
 DATE_FIN_TEST = "2026-08-01"
 
 # ---------------------------------------------------------------------------
-# Horizons
+# Horizons (À CONFIRMER PAR L'ÉQUIPE : repris de la première version du protocole)
 # ---------------------------------------------------------------------------
 DELAI_PUBLICATION = 2  # mois entre la période de référence et la publication
 HORIZONS = [1, 3, 6]  # horizons « consultation », en mois
@@ -80,14 +106,14 @@ NIVEAUX_INTERVALLE = [NIVEAU_AFFICHAGE, NIVEAU_ALERTE]
 # ---------------------------------------------------------------------------
 # Modèles et sélection
 # ---------------------------------------------------------------------------
-MODELES = ["naif", "ets", "sarima", "gbm"]
+MODELES = ["naif", "ets", "sarima"]
 MODELE_REFERENCE = "naif"
 SEUIL_DM = 0.05
 
 # ---------------------------------------------------------------------------
 # Colonnes des fichiers (contrat)
 # ---------------------------------------------------------------------------
-COLONNES_SERIES = ["date", "serie", "produit", "province", "prix"]
+COLONNES_SERIES = ["date", "serie", "produit", "province", "prix", "prix_impute"]
 COLONNES_PREVISIONS = [
     "serie", "modele", "date_origine", "date_cible", "horizon",
     "prevision", "inf80", "sup80", "inf95", "sup95", "reel",
@@ -106,18 +132,18 @@ COLONNES_TESTS_DM = [
 # ---------------------------------------------------------------------------
 LIBELLES_PRODUITS = {
     "mais": "Maïs-grain",
-    "soya": "Soya",
-    "ble": "Blé",
+    "canola": "Canola",
 }
 LIBELLES_PROVINCES = {
     "QC": "Québec",
     "ON": "Ontario",
+    "SK": "Saskatchewan",
+    "AB": "Alberta",
 }
 LIBELLES_MODELES = {
     "naif": "Naïf (référence)",
     "ets": "ETS / Holt-Winters",
     "sarima": "SARIMA",
-    "gbm": "Gradient boosting (LightGBM)",
 }
 LIBELLES_SERIES = {
     serie: f"{LIBELLES_PRODUITS[PRODUIT_PAR_SERIE[serie]]} – "
