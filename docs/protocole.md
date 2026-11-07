@@ -36,6 +36,15 @@ Données : Statistique Canada, tableau 32-10-0077-01 (prix des produits agricole
 - Valeurs de modele : naif, ets, sarima
 - Valeurs de serie : mais_QC, mais_ON, canola_SK, canola_AB
 
+## Interface commune des modèles (Proposition – à valider par l'équipe)
+- Chaque modèle est un module src/modeles/<modele>.py (naif, ets, sarima) qui expose la même fonction :
+  `prevoir(historique: pd.Series, pas: list[int]) -> pd.DataFrame`
+- historique : log des prix d'une seule série, index mensuel (DatetimeIndex, premier du mois, croissant, sans trou ni valeur manquante), données connues jusqu'à l'origine seulement (dernière valeur = date_origine).
+- pas : nombres de pas après la dernière donnée à prévoir, entiers ≥ 1 (config.PAS_PAR_HORIZON : 3, 5, 8 pour les horizons 1, 3, 6 mois).
+- Retour : une ligne par pas, dans l'ordre reçu, colonnes pas, prevision, inf80, sup80, inf95, sup95, exprimées en log ; niveaux tirés de config.NIVEAUX_INTERVALLE.
+- Le modèle n'utilise que l'historique reçu : il ne lit aucun fichier et n'a accès à aucune donnée postérieure à l'origine. Il est réestimé à chaque appel (une origine = un appel).
+- Le script d'évaluation construit les paires origine-cible (src/evaluation.py, generer_paires_origine_cible()), appelle prevoir() à chaque origine, convertit en dollars (exponentielle) et associe chaque pas à son horizon et à sa date cible pour produire les fichiers de resultats/.
+
 ## Conventions
 - Python 3.12, Windows. Interface Streamlit multipage + Plotly, entièrement en français.
 - L'application ne calcule aucun modèle : elle lit uniquement data/series.csv et resultats/.
