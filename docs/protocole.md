@@ -14,11 +14,11 @@ Données : Statistique Canada, tableau 32-10-0077-01 (prix des produits agricole
 ## Décisions méthodologiques
 - Modèles : naïf (référence), ETS/Holt-Winters, SARIMA ; une personne par modèle (Sabra : naïf, Hanane : ETS, Marc : SARIMA)
 - Découpage chronologique (proposé dans le notebook de prétraitement, **à valider par l'équipe**) : entraînement depuis 1985-01 ; trois validations de 12 mois avec entraînement croissant (2022-09 à 2023-08, 2023-09 à 2024-08, 2024-09 à 2025-08) ; test final réservé de 2025-09 à 2026-08. Mêmes périodes pour les quatre séries et les trois méthodes.
+- Parcours de chaque période (choix proposé par Marc, **à valider par l'équipe**) : origine glissante, modèle réestimé à chaque origine. Les 12 mois d'une période sont des mois **cibles** : chaque mois cible est prévu à chaque horizon depuis l'origine date_cible − pas (pas = horizon + délai de publication). Exemple : cible 2023-01 à l'horizon 6 mois (8 pas) → origine 2022-05, entraînement de 1985-01 à 2022-05. Les origines peuvent précéder la période, mais aucune cible n'en sort, donc pas de fuite vers la validation suivante ni vers le test. Avec 3 horizons, cela donne 12 erreurs par horizon, par série et par période, soit 36 en validation. Fonction commune : src/evaluation.py, generer_paires_origine_cible().
 
 ### À confirmer par l'équipe (repris de la première version du protocole)
 - Transformation : log des prix nominaux ; prévisions affichées en dollars
-- Délai de publication : environ 2 mois. Horizons « consultation » 1, 3, 6 mois = 3, 5, 8 pas après la dernière donnée. Avec un test de 12 mois, l'horizon de 8 pas ne laisse que 4 origines évaluables.
-- Manière de prévoir sur une période de 12 mois : une seule origine (1 à 12 pas) ou origine glissante (un pas à la fois)
+- Délai de publication : environ 2 mois. Horizons « consultation » 1, 3, 6 mois = 3, 5, 8 pas après la dernière donnée. Les mois de validation et de test étant des mois cibles, chaque horizon est évalué sur les mêmes 12 mois par période (les origines à 8 pas commencent 8 mois avant la période).
 - Métriques : MAE, RMSE, MAPE par horizon ; test de Diebold-Mariano ; taux de couverture des intervalles
 - Intervalles : 80 % (affichage), 95 % (alertes)
 - Modèle final : plus faible MAE moyenne sur les horizons, à condition de battre le naïf (Diebold-Mariano, 5 %)
