@@ -1,15 +1,15 @@
 # Suivi et prévision des prix agricoles
 
-Outil de suivi et de prévision des prix mensuels du maïs-grain, du soya et du blé au Québec et en Ontario, à partir du tableau 32-10-0077-01 de Statistique Canada.
-Il compare plusieurs modèles de prévision (naïf, ETS, SARIMA, gradient boosting) et signale les prix observés qui sortent des intervalles de prévision.
+Outil de suivi et de prévision des prix mensuels du maïs-grain (Québec, Ontario) et du canola (Saskatchewan, Alberta), à partir du tableau 32-10-0077-01 de Statistique Canada.
+Il compare trois méthodes de prévision (naïf, ETS, SARIMA) et signale les prix observés qui sortent des intervalles de prévision.
 Projet de session du cours INF-5103 (UQO) ; le protocole complet se trouve dans [docs/protocole.md](docs/protocole.md).
 
 ## Fonctionnalités
 
 L'application Streamlit est entièrement en français. Elle ne calcule aucun modèle : elle lit uniquement `data/series.csv` et les fichiers de `resultats/`.
 
-- **Tableau de bord** (accueil) : date de la dernière donnée disponible et rappel du délai de publication ; pour les 6 séries, dernier prix, variations sur 1 et 12 mois et indicateur d'alerte ; résumé chiffré des alertes.
-- **Historique** : prix depuis 1992, comparaison entre provinces ou entre produits, décomposition STL (tendance, saisonnalité, résidu), profil saisonnier moyen.
+- **Tableau de bord** (accueil) : date de la dernière donnée disponible et rappel du délai de publication ; pour les 4 séries, dernier prix, variations sur 1 et 12 mois et indicateur d'alerte ; résumé chiffré des alertes.
+- **Historique** : prix depuis 1985, comparaison entre provinces ou entre toutes les séries, décomposition STL (tendance, saisonnalité, résidu), profil saisonnier moyen.
 - **Prévision** : 5 dernières années prolongées par la prévision du modèle choisi et son intervalle (80 % ou 95 %), tableau des prévisions à 1, 3 et 6 mois, probabilité de dépasser le dernier prix observé, export CSV.
 - **Alertes** : prix observés hors de l'intervalle à 95 % de la prévision à l'horizon 1, sur graphique et dans un tableau filtrable par série.
 - **Comparaison des modèles** : MAE, RMSE et MAPE par horizon, tests de Diebold-Mariano, couverture réelle des intervalles contre la couverture visée, prévisions contre valeurs réelles sur la période de test.
@@ -44,15 +44,13 @@ Toutes les commandes se lancent depuis la racine du dépôt, avec l'environnemen
 
 ### 1. Données : `data/series.csv`
 
-1. Télécharger le tableau 32-10-0077-01 de Statistique Canada au format CSV (tableau complet).
-2. Placer le fichier `32100077.csv` dans `data/brut/` (ce dossier n'est pas versionné).
-3. Exécuter :
+Les fichiers sources `data/mais.csv` et `data/canola.csv` (extraits du tableau 32-10-0077-01) sont versionnés. Exécuter :
 
 ```bat
 python scripts\preparer_donnees.py
 ```
 
-Le script retire les codes entre crochets des noms de produits, garde les 6 séries à partir de 1992-01 et affiche les vérifications : nombre de mois par série, valeurs manquantes, unité ($/tonne métrique), dates consécutives. Si une vérification échoue, `data/series.csv` n'est pas écrit.
+Le script garde les 4 séries à partir de 1985-01, estime la valeur manquante de mai 2012 (canola, Alberta) par interpolation linéaire, comme dans `notebooks/01_pretraitement.ipynb`, et affiche les vérifications : nombre de mois par série, valeurs manquantes, unité ($/tonne métrique), dates consécutives. Si une vérification échoue, `data/series.csv` n'est pas écrit.
 
 ### 2. Résultats : `resultats/`
 
@@ -85,17 +83,17 @@ src/
   chargement.py                 lecture et validation de data/series.csv et de resultats/
   evaluation.py                 métriques, test de Diebold-Mariano, choix du modèle final
   interface_commune.py          panneau latéral, cache, graphiques, alertes
-  modeles/                      naif.py, ets.py, sarima.py, gbm.py
+  modeles/                      naif.py, ets.py, sarima.py
 scripts/
-  preparer_donnees.py           data/brut/32100077.csv -> data/series.csv
-  executer_evaluation.py        évaluation par origine glissante -> resultats/ (à venir)
+  preparer_donnees.py           data/mais.csv + data/canola.csv -> data/series.csv
+  executer_evaluation.py        évaluation sur le découpage commun -> resultats/ (à venir)
   generer_resultats_factices.py résultats factices pour le développement
 data/
+  mais.csv, canola.csv          fichiers sources extraits de Statistique Canada
   series.csv                    séries au format long (généré)
-  brut/                         fichier brut de Statistique Canada (non versionné)
 resultats/                      previsions.csv, previsions_futures.csv, metriques.csv, tests_dm.csv
 docs/protocole.md               protocole et contrat des fichiers
-notebooks/                      explorations
+notebooks/                      01_pretraitement.ipynb (contrôles, statistiques, découpage)
 rapport/figures/                figures du rapport
 requirements.txt                dépendances (versions figées)
 ```

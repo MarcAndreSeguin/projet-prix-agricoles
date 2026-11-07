@@ -41,7 +41,6 @@ PARAMETRES = {
     "naif": (0.0, 0.0, 1.00),
     "ets": (0.002, 0.020, 0.95),
     "sarima": (-0.003, 0.025, 1.05),
-    "gbm": (0.001, 0.015, 0.80),
 }
 
 Z80 = stats.norm.ppf(0.5 + config.NIVEAU_AFFICHAGE / 2)

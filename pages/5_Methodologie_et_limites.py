@@ -47,12 +47,17 @@ definitions = pd.DataFrame({
     "Géographie": [config.SERIES[s]["province"] for s in config.LISTE_SERIES],
 })
 st.dataframe(definitions, hide_index=True, use_container_width=True)
-st.warning(
-    "**Blé de l'Ontario : définition différente.** La série du Québec correspond à "
-    "« Wheat (except durum wheat) », tandis que celle de l'Ontario correspond à "
-    "« Ontario wheat excluding payments ». Les deux séries de blé ne mesurent donc pas "
-    "exactement le même produit.",
-    icon="⚠️",
+st.markdown(
+    "Le canola n'est retenu que pour la Saskatchewan et l'Alberta, ce qui permet une période "
+    "commune aux quatre séries à partir de janvier 1985 (au Québec, la série du canola ne "
+    "commence qu'en 2000)."
+)
+estimes = ", ".join(f"{ic.libelle_serie(s)} ({ic.formater_mois(d)})" for s, d in config.VALEURS_A_IMPUTER)
+st.info(
+    f"**Valeur manquante estimée** : {estimes}. Le prix est absent de la source ; il est "
+    "estimé par la moyenne des deux mois voisins (interpolation linéaire) et signalé dans la "
+    "colonne prix_impute de data/series.csv.",
+    icon="ℹ️",
 )
 
 # ---------------------------------------------------------------------------
@@ -61,12 +66,13 @@ st.warning(
 st.header("Protocole d'évaluation")
 horizons = ", ".join(f"{config.LIBELLES_HORIZONS[h]} ({p} mois après la dernière donnée)"
                      for h, p in config.PAS_PAR_HORIZON.items())
+validations = " ; ".join(f"{ic.formater_mois(d)} à {ic.formater_mois(f)}"
+                         for d, f in config.PERIODES_VALIDATION)
 st.markdown(f"""
 **Modèles comparés**
 - {config.LIBELLES_MODELES['naif']} : la prévision est le dernier prix observé.
 - {config.LIBELLES_MODELES['ets']} : lissage exponentiel.
 - {config.LIBELLES_MODELES['sarima']} : modèle autorégressif intégré à moyenne mobile saisonnier.
-- {config.LIBELLES_MODELES['gbm']} : modèle global entraîné sur les 6 séries.
 
 **Transformation** : les modèles sont estimés sur le logarithme des prix nominaux ;
 les prévisions sont affichées en dollars.
@@ -74,10 +80,12 @@ les prévisions sont affichées en dollars.
 **Horizons** : compte tenu du délai de publication, les horizons de consultation sont
 {horizons}.
 
-**Évaluation par origine glissante** : entraînement à partir de
-{ic.formater_mois(config.DATE_DEBUT_ENTRAINEMENT)} ; chaque mois depuis
-{ic.formater_mois(config.DATE_DEBUT_TEST)}, les prévisions sont produites avec les seules
-données connues à cette date (l'origine), puis comparées aux prix observés.
+**Découpage chronologique** (commun aux quatre séries et aux trois méthodes) : entraînement à
+partir de {ic.formater_mois(config.DATE_DEBUT_ENTRAINEMENT)} ; trois périodes de validation de
+12 mois ({validations}), chacune précédée de toutes les données antérieures ; test final de
+{ic.formater_mois(config.DATE_DEBUT_TEST)} à {ic.formater_mois(config.DATE_FIN_TEST)}, réservé et
+non utilisé pour choisir les modèles. Les prévisions sont produites avec les seules données
+connues à leur date d'origine, puis comparées aux prix observés.
 
 **Métriques**, par horizon :
 - MAE (erreur absolue moyenne, en dollars) ;
