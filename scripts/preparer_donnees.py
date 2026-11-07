@@ -3,9 +3,14 @@
 Usage : python scripts/preparer_donnees.py
 
 Les deux fichiers sources ont été extraits du tableau 32-10-0077-01 de
-Statistique Canada (voir notebooks/01_pretraitement.ipynb pour les contrôles
-et les statistiques descriptives). Ce script reprend les mêmes traitements
-pour produire le fichier commun aux trois méthodes :
+Statistique Canada. Ce script reproduit le prétraitement du notebook
+notebooks/01_pretraitement.ipynb, qui reste la référence (contrôles,
+statistiques descriptives, graphiques). Le notebook n'écrit aucun fichier :
+c'est ce script qui produit data/series.csv, le fichier commun aux trois
+méthodes et à l'application. Le découpage chronologique du notebook n'est pas
+repris ici ; les périodes utilisées sont celles de src/config.py.
+
+Étapes :
 
 1. lecture des sources (cp1252, dates mois/jour/année) ;
 2. sélection des 4 séries de config.SERIES, de config.DATE_DEBUT à la dernière date ;

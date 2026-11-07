@@ -1,6 +1,9 @@
-"""Page Méthodologie et limites : description des données, des modèles et des limites de l'outil.
+"""Page Méthodologie et limites : description des données, du prétraitement, des modèles et
+des limites de l'outil.
 
-Le contenu descriptif reprend docs/protocole.md ; les sections « Limites » et
+Le contenu descriptif reprend docs/protocole.md et notebooks/01_pretraitement.ipynb
+(contrôles, valeur estimée et statistiques recalculés à partir de data/series.csv) ;
+les sections « Limites » et
 « Recommandations » sont rédigées par l'équipe.
 """
 
@@ -52,13 +55,95 @@ st.markdown(
     "commune aux quatre séries à partir de janvier 1985 (au Québec, la série du canola ne "
     "commence qu'en 2000)."
 )
-estimes = ", ".join(f"{ic.libelle_serie(s)} ({ic.formater_mois(d)})" for s, d in config.VALEURS_A_IMPUTER)
-st.info(
-    f"**Valeur manquante estimée** : {estimes}. Le prix est absent de la source ; il est "
-    "estimé par la moyenne des deux mois voisins (interpolation linéaire) et signalé dans la "
-    "colonne prix_impute de data/series.csv.",
-    icon="ℹ️",
-)
+
+# ---------------------------------------------------------------------------
+# Prétraitement
+# ---------------------------------------------------------------------------
+st.header("Prétraitement")
+st.markdown("""
+Le prétraitement de référence est le notebook **notebooks/01_pretraitement.ipynb**. Il lit les
+fichiers sources **data/mais.csv** et **data/canola.csv** (extraits du tableau de Statistique
+Canada, encodage cp1252, dates au format mois/jour/année), contrôle les quatre séries, calcule
+les statistiques descriptives et estime la valeur manquante. Le script
+**scripts/preparer_donnees.py** reproduit ces traitements et écrit **data/series.csv**, seul
+fichier de données lu par l'application.
+""")
+
+
+def controler(series):
+    """Contrôles par série sur data/series.csv : calendrier mensuel, doublons, valeurs estimées."""
+    lignes = []
+    for serie in config.LISTE_SERIES:
+        s = series[series["serie"] == serie]
+        if s.empty:
+            continue
+        dates = pd.DatetimeIndex(s["date"])
+        calendrier = pd.date_range(config.DATE_DEBUT, dates.max(), freq="MS")
+        lignes.append({
+            "Série": ic.libelle_serie(serie),
+            "Début": ic.formater_mois(dates.min()),
+            "Fin": ic.formater_mois(dates.max()),
+            "Mois": len(s),
+            "Mois absents": len(calendrier.difference(dates)),
+            "Dates hors calendrier": len(dates.difference(calendrier)),
+            "Doublons": int(dates.duplicated().sum()),
+            "Prix manquants dans la source (estimés)": int(s["prix_impute"].sum()),
+        })
+    return pd.DataFrame(lignes)
+
+
+def detailler_estimations(series):
+    """Valeurs estimées avec les prix des deux mois voisins."""
+    lignes = []
+    for r in series[series["prix_impute"]].itertuples():
+        prix = series[series["serie"] == r.serie].set_index("date")["prix"]
+        avant = prix.get(r.date - pd.DateOffset(months=1))
+        apres = prix.get(r.date + pd.DateOffset(months=1))
+        lignes.append({
+            "Série": ic.libelle_serie(r.serie),
+            "Mois estimé": ic.formater_mois(r.date),
+            "Mois précédent": f"{ic.formater_mois(r.date - pd.DateOffset(months=1))} : "
+                              f"{ic.formater_prix(avant, 3)}",
+            "Mois suivant": f"{ic.formater_mois(r.date + pd.DateOffset(months=1))} : "
+                            f"{ic.formater_prix(apres, 3)}",
+            "Valeur estimée": ic.formater_prix(r.prix, 3),
+        })
+    return pd.DataFrame(lignes)
+
+
+if series is None:
+    st.warning("data/series.csv est absent : les contrôles et les statistiques ne peuvent pas "
+               "être affichés. Exécuter `python scripts/preparer_donnees.py`.")
+else:
+    st.subheader("Contrôles réalisés")
+    st.markdown(f"""
+- **Calendrier** : chaque série est comparée au calendrier mensuel attendu, de
+  {ic.formater_mois(config.DATE_DEBUT)} à son dernier mois (mois absents, dates hors calendrier).
+- **Doublons** : une seule observation par série et par mois (combinaison date, province, culture).
+- **Valeurs manquantes** : nombre de prix vides par série dans les fichiers sources.
+""")
+    st.dataframe(controler(series), hide_index=True, use_container_width=True)
+
+    st.subheader("Valeur manquante estimée")
+    estimations = detailler_estimations(series)
+    if estimations.empty:
+        st.markdown("Aucune valeur estimée dans data/series.csv.")
+    else:
+        premiere_validation = ic.formater_mois(config.PERIODES_VALIDATION[0][0])
+        st.markdown(f"""
+Le prix absent de la source est remplacé par la moyenne des prix des deux mois voisins, ce qui
+correspond à une interpolation linéaire pour un seul mois manquant. La valeur est signalée dans la
+colonne **prix_impute** de data/series.csv. L'estimation est faite avant le découpage chronologique ;
+les mois voisins précèdent la première période de validation ({premiere_validation}).
+""")
+        st.dataframe(estimations, hide_index=True, use_container_width=True)
+
+    st.subheader("Statistiques descriptives")
+    st.dataframe(ic.tableau_statistiques(ic.statistiques_descriptives(series)),
+                 hide_index=True, use_container_width=True)
+    st.caption(f"Prix en {config.UNITE_PRIX}, de {ic.formater_mois(series['date'].min())} à "
+               f"{ic.formater_mois(series['date'].max())}, hors valeur estimée (même calcul que "
+               "notebooks/01_pretraitement.ipynb).")
 
 # ---------------------------------------------------------------------------
 # Protocole d'évaluation

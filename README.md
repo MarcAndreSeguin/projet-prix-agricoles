@@ -9,11 +9,11 @@ Projet de session du cours INF-5103 (UQO) ; le protocole complet se trouve dans 
 L'application Streamlit est entièrement en français. Elle ne calcule aucun modèle : elle lit uniquement `data/series.csv` et les fichiers de `resultats/`.
 
 - **Tableau de bord** (accueil) : date de la dernière donnée disponible et rappel du délai de publication ; pour les 4 séries, dernier prix, variations sur 1 et 12 mois et indicateur d'alerte ; résumé chiffré des alertes.
-- **Historique** : prix depuis 1985, comparaison entre provinces ou entre toutes les séries, décomposition STL (tendance, saisonnalité, résidu), profil saisonnier moyen.
+- **Historique** : prix depuis 1985, comparaison entre provinces ou entre toutes les séries, périodes de validation et de test ombrées, valeur estimée marquée, décomposition STL (tendance, saisonnalité, résidu), profil saisonnier moyen, statistiques descriptives.
 - **Prévision** : 5 dernières années prolongées par la prévision du modèle choisi et son intervalle (80 % ou 95 %), tableau des prévisions à 1, 3 et 6 mois, probabilité de dépasser le dernier prix observé, export CSV.
 - **Alertes** : prix observés hors de l'intervalle à 95 % de la prévision à l'horizon 1, sur graphique et dans un tableau filtrable par série.
 - **Comparaison des modèles** : MAE, RMSE et MAPE par horizon, tests de Diebold-Mariano, couverture réelle des intervalles contre la couverture visée, prévisions contre valeurs réelles sur la période de test.
-- **Méthodologie et limites** : source et licence des données, définition des séries, protocole d'évaluation.
+- **Méthodologie et limites** : source et licence des données, définition des séries, prétraitement (contrôles, valeur estimée, statistiques descriptives), protocole d'évaluation.
 
 Un panneau latéral commun (produit, province, modèle, niveau d'intervalle) conserve les choix d'une page à l'autre. Le modèle proposé par défaut est le modèle final de la série, selon la règle du protocole. Un bandeau d'avertissement s'affiche tant que les résultats sont factices (présence de `resultats/FACTICE.txt`).
 
@@ -44,13 +44,32 @@ Toutes les commandes se lancent depuis la racine du dépôt, avec l'environnemen
 
 ### 1. Données : `data/series.csv`
 
-Les fichiers sources `data/mais.csv` et `data/canola.csv` (extraits du tableau 32-10-0077-01) sont versionnés. Exécuter :
+Chaîne de prétraitement :
+
+```
+data/mais.csv, data/canola.csv     fichiers sources extraits du tableau 32-10-0077-01 (versionnés)
+        │
+        ▼
+notebooks/01_pretraitement.ipynb   prétraitement de référence : contrôles (calendrier, doublons,
+        │                          valeurs manquantes), statistiques descriptives, graphiques,
+        │                          estimation de mai 2012 (canola, Alberta) ; n'écrit aucun fichier
+        ▼
+scripts/preparer_donnees.py        reproduit ces traitements et écrit le fichier commun
+        │
+        ▼
+data/series.csv                    format long du contrat (docs/protocole.md)
+        │
+        ▼
+application Streamlit              lit uniquement data/series.csv et resultats/
+```
+
+Pour régénérer `data/series.csv`, exécuter :
 
 ```bat
 python scripts\preparer_donnees.py
 ```
 
-Le script garde les 4 séries à partir de 1985-01, estime la valeur manquante de mai 2012 (canola, Alberta) par interpolation linéaire, comme dans `notebooks/01_pretraitement.ipynb`, et affiche les vérifications : nombre de mois par série, valeurs manquantes, unité ($/tonne métrique), dates consécutives. Si une vérification échoue, `data/series.csv` n'est pas écrit.
+Le script garde les 4 séries à partir de 1985-01, estime la valeur manquante de mai 2012 (canola, Alberta) par interpolation linéaire, comme dans le notebook, et affiche les vérifications : nombre de mois par série, valeurs manquantes, unité ($/tonne métrique), dates consécutives. Si une vérification échoue, `data/series.csv` n'est pas écrit. Le découpage chronologique utilisé par l'outil est celui de `src/config.py`.
 
 ### 2. Résultats : `resultats/`
 
@@ -85,7 +104,7 @@ src/
   interface_commune.py          panneau latéral, cache, graphiques, alertes
   modeles/                      naif.py, ets.py, sarima.py
 scripts/
-  preparer_donnees.py           data/mais.csv + data/canola.csv -> data/series.csv
+  preparer_donnees.py           data/mais.csv + data/canola.csv -> data/series.csv (reproduit le notebook)
   executer_evaluation.py        évaluation sur le découpage commun -> resultats/ (à venir)
   generer_resultats_factices.py résultats factices pour le développement
 data/
@@ -93,7 +112,7 @@ data/
   series.csv                    séries au format long (généré)
 resultats/                      previsions.csv, previsions_futures.csv, metriques.csv, tests_dm.csv
 docs/protocole.md               protocole et contrat des fichiers
-notebooks/                      01_pretraitement.ipynb (contrôles, statistiques, découpage)
+notebooks/                      01_pretraitement.ipynb (prétraitement de référence)
 rapport/figures/                figures du rapport
 requirements.txt                dépendances (versions figées)
 ```
