@@ -1,1 +1,1 @@
-"""Exécute l'évaluation par origine glissante et produit les fichiers de resultats/."""
+"""Exécute l'évaluation sur le découpage commun (config.PERIODES_VALIDATION, test final) et produit les fichiers de resultats/."""
