@@ -75,16 +75,20 @@ DATE_DEBUT = "1985-01-01"
 DATE_FIN = "2026-08-01"
 NB_MOIS_ATTENDU = 500
 
-# Découpage proposé dans notebooks/01_pretraitement.ipynb (À VALIDER PAR
-# L'ÉQUIPE) : trois validations de 12 mois avec entraînement croissant, puis
-# 12 mois de test final réservés, communs aux quatre séries et aux trois méthodes.
+# Découpage (À VALIDER PAR L'ÉQUIPE) : structure proposée dans
+# notebooks/01_pretraitement.ipynb (trois validations de 12 mois avec
+# entraînement croissant, puis test final réservé), avec un test allongé à
+# 36 mois (choix de Marc) pour que le test de Diebold-Mariano soit calculable
+# à tous les horizons (il exige au moins 2 * pas + 1 = 17 erreurs à 8 pas).
+# Les validations reculent donc de deux ans. Communs aux quatre séries et aux
+# trois méthodes.
 DATE_DEBUT_ENTRAINEMENT = "1985-01-01"
 PERIODES_VALIDATION = [
+    ("2020-09-01", "2021-08-01"),
+    ("2021-09-01", "2022-08-01"),
     ("2022-09-01", "2023-08-01"),
-    ("2023-09-01", "2024-08-01"),
-    ("2024-09-01", "2025-08-01"),
 ]
-DATE_DEBUT_TEST = "2025-09-01"
+DATE_DEBUT_TEST = "2023-09-01"
 DATE_FIN_TEST = "2026-08-01"
 
 # Manière de parcourir chaque période (choix de Marc, À VALIDER PAR L'ÉQUIPE) :
