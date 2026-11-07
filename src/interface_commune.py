@@ -1,6 +1,6 @@
 """Éléments partagés par les pages Streamlit : lecture en cache, panneau latéral,
-bandeau des résultats factices, mise en forme, graphiques Plotly, alertes et
-probabilité de dépassement.
+bandeau des résultats factices, mise en forme, graphiques Plotly, alertes,
+probabilité de dépassement et statistiques du prétraitement.
 
 L'interface ne calcule aucun modèle : elle lit uniquement data/series.csv et
 les fichiers de resultats/.
@@ -35,6 +35,12 @@ TRACES_MODELES = {"naif": "dot", "ets": "dash", "sarima": "dashdot"}
 # Courbes comparées (provinces ou toutes les séries), dans l'ordre d'affichage
 COULEURS_COMPARAISON = ["#000000", "#0072B2", "#D55E00", "#009E73"]
 TRACES_COMPARAISON = ["solid", "dash", "dot", "dashdot"]
+# Périodes du découpage et valeurs estimées
+COULEUR_VALIDATION = "#999999"
+OPACITES_VALIDATION = [0.12, 0.24]  # alternées d'un bloc à l'autre
+COULEUR_TEST = "#E69F00"
+OPACITE_TEST = 0.25
+COULEUR_ESTIMEE = "#CC79A7"
 POLICE = "Source Sans Pro, Arial, sans-serif"
 
 MOIS_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
@@ -342,6 +348,58 @@ def probabilite_depassement(prevision, borne_inf, borne_sup, seuil, niveau):
 
 
 # ---------------------------------------------------------------------------
+# Statistiques descriptives (prétraitement)
+# ---------------------------------------------------------------------------
+STATISTIQUES = {
+    "prix_observes": "Observations",
+    "moyenne": "Moyenne",
+    "ecart_type": "Écart-type",
+    "minimum": "Minimum",
+    "Q1": "Q1",
+    "mediane": "Médiane",
+    "Q3": "Q3",
+    "maximum": "Maximum",
+}
+
+
+def statistiques_descriptives(series, liste_series=None):
+    """Statistiques descriptives des prix par série, hors valeurs imputées.
+
+    Même calcul que notebooks/01_pretraitement.ipynb, où les statistiques sont
+    produites avant l'imputation : les lignes où prix_impute vaut True sont
+    exclues (canola_AB compte donc 499 observations au lieu de 500).
+
+    series : DataFrame au format de data/series.csv.
+    liste_series : séries à garder (None pour toutes).
+    Retourne un DataFrame indexé par série, dans l'ordre de config.LISTE_SERIES,
+    avec les colonnes de STATISTIQUES.
+    """
+    s = series if liste_series is None else series[series["serie"].isin(liste_series)]
+    s = s[~s["prix_impute"].astype(bool)]
+    tableau = s.groupby("serie")["prix"].describe().rename(columns={
+        "count": "prix_observes", "mean": "moyenne", "std": "ecart_type", "min": "minimum",
+        "25%": "Q1", "50%": "mediane", "75%": "Q3", "max": "maximum",
+    })
+    ordre = [serie for serie in config.LISTE_SERIES if serie in tableau.index]
+    return tableau.reindex(ordre)[list(STATISTIQUES)]
+
+
+def tableau_statistiques(statistiques):
+    """Met en forme le résultat de statistiques_descriptives() pour st.dataframe.
+
+    Les valeurs sont arrondies avec pandas, comme dans le notebook, avant la mise
+    en forme (les deux arrondis peuvent différer sur un cas limite comme 383,185).
+    """
+    tableau = pd.DataFrame({"Série": [libelle_serie(s) for s in statistiques.index]})
+    for colonne, nom in STATISTIQUES.items():
+        if colonne == "prix_observes":
+            tableau[nom] = statistiques[colonne].astype(int).to_numpy()
+        else:
+            tableau[nom] = statistiques[colonne].round(2).map(formater_nombre).to_numpy()
+    return tableau
+
+
+# ---------------------------------------------------------------------------
 # Graphiques Plotly
 # ---------------------------------------------------------------------------
 def mettre_en_forme(figure, titre=None, titre_y=f"Prix ({config.UNITE_PRIX})", hauteur=440):
@@ -443,6 +501,55 @@ def ajouter_selecteur_periode(figure):
         x=0, y=1.02, xanchor="left", yanchor="bottom",
     ))
     figure.update_layout(legend=dict(y=1.12))
+    return figure
+
+
+def ajouter_periodes(figure):
+    """Ombre les blocs de validation et la période de test (config.py) sur l'axe des dates.
+
+    Les blocs de validation alternent deux gris pour rester distincts ; le test
+    est en orange. Chaque bande couvre ses mois en entier (du premier jour du
+    premier mois au premier jour du mois suivant le dernier). Deux entrées de
+    légende décrivent les bandes.
+    """
+    for numero, (debut, fin) in enumerate(config.PERIODES_VALIDATION):
+        figure.add_vrect(
+            x0=debut, x1=pd.Timestamp(fin) + pd.DateOffset(months=1), layer="below", line_width=0,
+            fillcolor=COULEUR_VALIDATION, opacity=OPACITES_VALIDATION[numero % 2],
+        )
+    figure.add_vrect(
+        x0=config.DATE_DEBUT_TEST, x1=pd.Timestamp(config.DATE_FIN_TEST) + pd.DateOffset(months=1),
+        layer="below", line_width=0, fillcolor=COULEUR_TEST, opacity=OPACITE_TEST,
+    )
+    nb_blocs = len(config.PERIODES_VALIDATION)
+    debut_validation = config.PERIODES_VALIDATION[0][0]
+    fin_validation = config.PERIODES_VALIDATION[-1][1]
+    legendes = [
+        (COULEUR_VALIDATION, OPACITES_VALIDATION[1],
+         f"Validation ({nb_blocs} blocs, {formater_mois(debut_validation)} à "
+         f"{formater_mois(fin_validation)})"),
+        (COULEUR_TEST, OPACITE_TEST,
+         f"Test ({formater_mois(config.DATE_DEBUT_TEST)} à {formater_mois(config.DATE_FIN_TEST)})"),
+    ]
+    for couleur, opacite, nom in legendes:
+        figure.add_trace(go.Scatter(
+            x=[None], y=[None], mode="markers", name=nom, hoverinfo="skip",
+            marker=dict(symbol="square", size=14, color=_transparence(couleur, opacite)),
+        ))
+    return figure
+
+
+def ajouter_valeurs_estimees(figure, series, liste_series):
+    """Marque les valeurs estimées (prix_impute) des séries affichées."""
+    estimes = series[series["serie"].isin(liste_series) & series["prix_impute"].astype(bool)]
+    if estimes.empty:
+        return figure
+    figure.add_trace(go.Scatter(
+        x=estimes["date"], y=estimes["prix"], mode="markers", name="Valeur estimée (interpolation)",
+        marker=dict(symbol="diamond-open", size=12, color=COULEUR_ESTIMEE, line=dict(width=2)),
+        customdata=estimes["serie"].map(libelle_serie),
+        hovertemplate="%{customdata} : %{y:,.2f} $ (valeur estimée)<extra></extra>",
+    ))
     return figure
 
 
