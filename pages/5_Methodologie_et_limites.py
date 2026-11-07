@@ -81,7 +81,7 @@ les prévisions sont affichées en dollars.
 {horizons}.
 
 **Découpage chronologique** (commun aux quatre séries et aux trois méthodes) : entraînement à
-partir de {ic.formater_mois(config.DATE_DEBUT_ENTRAINEMENT)} ; trois périodes de validation de
+partir de {ic.formater_mois(config.DATE_DEBUT_ENTRAINEMENT)} ; {len(config.PERIODES_VALIDATION)} périodes de validation de
 12 mois ({validations}), chacune précédée de toutes les données antérieures ; test final de
 {ic.formater_mois(config.DATE_DEBUT_TEST)} à {ic.formater_mois(config.DATE_FIN_TEST)}, réservé et
 non utilisé pour choisir les modèles. Les prévisions sont produites avec les seules données

@@ -45,6 +45,19 @@ def generer_paires_origine_cible(debut, fin, horizons=config.HORIZONS):
     return paires.sort_values(["date_origine", "date_cible"]).reset_index(drop=True)
 
 
+def numero_periode_validation(date_cible):
+    """Numéro (1 à len(PERIODES_VALIDATION)) du bloc de validation d'une date cible.
+
+    Retourne None si la date n'appartient à aucun bloc (par exemple le test).
+    Sert à rapporter les erreurs bloc par bloc, donc par régime de prix.
+    """
+    date_cible = pd.Timestamp(date_cible)
+    for numero, (debut, fin) in enumerate(config.PERIODES_VALIDATION, start=1):
+        if pd.Timestamp(debut) <= date_cible <= pd.Timestamp(fin):
+            return numero
+    return None
+
+
 def origines_a_estimer(debut, fin, horizons=config.HORIZONS):
     """Origines distinctes d'une période : une estimation du modèle par origine."""
     return sorted(generer_paires_origine_cible(debut, fin, horizons)["date_origine"].unique())

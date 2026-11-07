@@ -80,10 +80,15 @@ NB_MOIS_ATTENDU = 500
 # entraînement croissant, puis test final réservé), avec un test allongé à
 # 36 mois (choix de Marc) pour que le test de Diebold-Mariano soit calculable
 # à tous les horizons (il exige au moins 2 * pas + 1 = 17 erreurs à 8 pas).
-# Les validations reculent donc de deux ans. Communs aux quatre séries et aux
-# trois méthodes.
+# Six validations contiguës de 12 mois sur les six années précédant le test
+# (choix de Marc) pour couvrir plusieurs régimes de prix : stable (2017-2020),
+# flambée (2020-2022), sommet et début de baisse (2022-2023). Communs aux
+# quatre séries et aux trois méthodes.
 DATE_DEBUT_ENTRAINEMENT = "1985-01-01"
 PERIODES_VALIDATION = [
+    ("2017-09-01", "2018-08-01"),
+    ("2018-09-01", "2019-08-01"),
+    ("2019-09-01", "2020-08-01"),
     ("2020-09-01", "2021-08-01"),
     ("2021-09-01", "2022-08-01"),
     ("2022-09-01", "2023-08-01"),
