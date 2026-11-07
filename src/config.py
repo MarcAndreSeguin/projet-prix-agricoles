@@ -87,6 +87,15 @@ PERIODES_VALIDATION = [
 DATE_DEBUT_TEST = "2025-09-01"
 DATE_FIN_TEST = "2026-08-01"
 
+# Manière de parcourir chaque période (choix de Marc, À VALIDER PAR L'ÉQUIPE) :
+# origine glissante, modèle réestimé à chaque origine. Les mois des périodes
+# de validation et de test sont des mois CIBLES : chaque mois cible est prévu
+# à chaque horizon depuis l'origine date_cible - PAS_PAR_HORIZON[horizon].
+# Les origines peuvent donc précéder la période, mais aucune cible n'en sort
+# (pas de fuite d'une validation vers la suivante ni vers le test).
+MODE_ORIGINE = "glissante"
+REESTIMATION_A_CHAQUE_ORIGINE = True
+
 # ---------------------------------------------------------------------------
 # Horizons (À CONFIRMER PAR L'ÉQUIPE : repris de la première version du protocole)
 # ---------------------------------------------------------------------------
