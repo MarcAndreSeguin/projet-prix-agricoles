@@ -17,7 +17,7 @@ from scipy import stats
 
 from src import config
 from src.chargement import charger_resultat, charger_series, chemin_resultat
-from src.evaluation import choisir_modele_final
+from src.evaluation import choisir_modele_final, filtrer_periode
 
 # ---------------------------------------------------------------------------
 # Style
@@ -32,15 +32,16 @@ COULEURS_MODELES = {
     "sarima": "#D55E00",
 }
 TRACES_MODELES = {"naif": "dot", "ets": "dash", "sarima": "dashdot"}
-# Courbes comparées (provinces ou toutes les séries), dans l'ordre d'affichage
+# Courbes comparées (les deux séries), dans l'ordre d'affichage
 COULEURS_COMPARAISON = ["#000000", "#0072B2", "#D55E00", "#009E73"]
 TRACES_COMPARAISON = ["solid", "dash", "dot", "dashdot"]
 # Périodes du découpage et valeurs estimées
 COULEUR_VALIDATION = "#999999"
 OPACITES_VALIDATION = [0.12, 0.24]  # alternées d'un bloc à l'autre
 COULEUR_TEST = "#E69F00"
-OPACITE_TEST = 0.25
+OPACITES_TEST = [0.18, 0.34]  # alternées d'une période de test à l'autre
 COULEUR_ESTIMEE = "#CC79A7"
+COULEUR_DESAISONNALISEE = "#D55E00"
 POLICE = "Source Sans Pro, Arial, sans-serif"
 
 MOIS_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
@@ -89,13 +90,36 @@ def formater_mois(date):
 
 
 def libelle_serie(serie):
-    """Libellé français d'une série : « Maïs-grain – Québec »."""
+    """Libellé français d'une série : « Maïs-grain – Ontario »."""
     return config.LIBELLES_SERIES.get(serie, serie)
 
 
 def libelle_modele(modele):
     """Libellé français d'un modèle."""
     return config.LIBELLES_MODELES.get(modele, modele)
+
+
+def bornes_periode(periode):
+    """Premier et dernier mois cibles d'une période de metriques.csv."""
+    if periode == config.PERIODE_VALIDATION:
+        return config.DATE_DEBUT_VALIDATION, config.DATE_FIN_VALIDATION
+    if periode == config.PERIODE_TEST_GLOBAL:
+        return config.DATE_DEBUT_TEST, config.DATE_FIN_TEST
+    return config.PERIODES_TEST[periode]
+
+
+def libelle_periode(periode, avec_dates=True):
+    """Libellé d'une période : « Test 1 (septembre 2020 à août 2022) »."""
+    nom = config.LIBELLES_PERIODES.get(periode, periode)
+    if not avec_dates:
+        return nom
+    debut, fin = bornes_periode(periode)
+    blocs = f"{len(config.PERIODES_VALIDATION)} blocs, " if periode == config.PERIODE_VALIDATION else ""
+    return f"{nom} ({blocs}{formater_mois(debut)} à {formater_mois(fin)})"
+
+
+# Choix de période proposés dans les pages (test_global par défaut)
+PERIODES_AFFICHEES = [config.PERIODE_TEST_GLOBAL, *config.PERIODES_TEST, config.PERIODE_VALIDATION]
 
 
 def colonnes_intervalle(niveau):
@@ -177,8 +201,8 @@ def lire_series():
 
 
 def lire_resultat(nom):
-    """Retourne un fichier de resultats/ (previsions, previsions_futures, metriques,
-    tests_dm), ou None s'il est absent."""
+    """Retourne un fichier de resultats/ (previsions, previsions_futures, metriques),
+    ou None s'il est absent."""
     chemin = chemin_resultat(nom)
     if not chemin.exists():
         return None
@@ -217,12 +241,11 @@ def modeles_finaux():
     La règle est appliquée sur la période de validation (config.PERIODE_SELECTION).
     """
     metriques = lire_resultat("metriques")
-    tests_dm = lire_resultat("tests_dm")
-    if metriques is None or tests_dm is None:
+    if metriques is None:
         return {}
     finaux = {}
     for serie in config.LISTE_SERIES:
-        modele = choisir_modele_final(metriques, tests_dm, serie)
+        modele = choisir_modele_final(metriques, serie)
         if modele is not None:
             finaux[serie] = modele
     return finaux
@@ -279,21 +302,21 @@ def _widget_persistant(fonction, cle, libelle, options, defaut, **options_widget
 def panneau_lateral(avec_modele=True, avec_niveau=True):
     """Affiche le panneau latéral commun et retourne la Selection courante.
 
+    Seul le produit est choisi : chaque produit est suivi dans une seule
+    province, affichée sous le choix.
     Le modèle proposé par défaut est le modèle final de la série choisie
-    (règle du protocole, calculée à partir de metriques.csv et tests_dm.csv).
+    (règle du protocole, calculée à partir de metriques.csv).
     Seuls les modèles présents dans les résultats sont proposés.
     """
     barre = st.sidebar
     barre.header("Sélection")
 
-    produits = list(config.PROVINCES_PAR_PRODUIT)
+    produits = config.LISTE_PRODUITS
     produit = _widget_persistant(barre.selectbox, "produit", "Produit", produits, produits[0],
                                  format_func=config.LIBELLES_PRODUITS.get)
-    # Seules les provinces suivies pour ce produit sont proposées
-    provinces = config.PROVINCES_PAR_PRODUIT[produit]
-    province = _widget_persistant(barre.selectbox, "province", "Province", provinces, provinces[0],
-                                  format_func=config.LIBELLES_PROVINCES.get)
-    serie = f"{produit}_{province}"
+    serie = config.SERIE_PAR_PRODUIT[produit]
+    province = config.PROVINCE_PAR_SERIE[serie]
+    barre.markdown(f"Province : **{config.LIBELLES_PROVINCES[province]}**")
 
     finaux = modeles_finaux()
     modele_final = finaux.get(serie)
@@ -334,12 +357,13 @@ def calculer_alertes(previsions, modeles_par_serie=None, periode=config.PERIODE_
 
     modeles_par_serie : {série: modèle} pour ne garder qu'un modèle par série
     (par exemple le modèle final) ; None pour garder tous les modèles.
-    periode : période de previsions.csv à utiliser (le test par défaut).
+    periode : période de metriques.csv à couvrir (test_global par défaut, soit
+    test_1, test_2 et test_3 ; ou test_1, test_2, test_3, validation).
     Colonnes ajoutées : sens (« au-dessus » ou « en dessous »), borne (valeur de la
     borne franchie) et ecart_pct, écart relatif entre le prix observé et cette borne.
     """
-    p = previsions[(previsions["periode"] == periode)
-                   & (previsions["horizon"] == config.HORIZON_ALERTE) & previsions["reel"].notna()]
+    p = filtrer_periode(previsions, periode)
+    p = p[(p["horizon"] == config.HORIZON_ALERTE) & p["reel"].notna()]
     if modeles_par_serie is not None:
         p = p[p["modele"] == p["serie"].map(modeles_par_serie)]
     au_dessus = p["reel"] > p[SUP_ALERTE]
@@ -405,7 +429,7 @@ def statistiques_descriptives(series, liste_series=None):
 
     Même calcul que notebooks/01_pretraitement.ipynb, où les statistiques sont
     produites avant l'imputation : les lignes où prix_impute vaut True sont
-    exclues (canola_AB compte donc 499 observations au lieu de 500).
+    exclues (aucune dans les deux séries retenues).
 
     series : DataFrame au format de data/series.csv.
     liste_series : séries à garder (None pour toutes).
@@ -543,31 +567,28 @@ def ajouter_selecteur_periode(figure):
 
 
 def ajouter_periodes(figure):
-    """Ombre les blocs de validation et la période de test (config.py) sur l'axe des dates.
+    """Ombre les blocs de validation et les trois périodes de test (config.py) sur l'axe des dates.
 
-    Les blocs de validation alternent deux gris pour rester distincts ; le test
-    est en orange. Chaque bande couvre ses mois en entier (du premier jour du
-    premier mois au premier jour du mois suivant le dernier). Deux entrées de
-    légende décrivent les bandes.
+    Les blocs de validation alternent deux gris, les périodes de test deux
+    intensités d'orange, pour rester distincts. Chaque bande couvre ses mois en
+    entier (du premier jour du premier mois au premier jour du mois suivant le
+    dernier). Deux entrées de légende décrivent les bandes.
     """
     for numero, (debut, fin) in enumerate(config.PERIODES_VALIDATION):
         figure.add_vrect(
             x0=debut, x1=pd.Timestamp(fin) + pd.DateOffset(months=1), layer="below", line_width=0,
             fillcolor=COULEUR_VALIDATION, opacity=OPACITES_VALIDATION[numero % 2],
         )
-    figure.add_vrect(
-        x0=config.DATE_DEBUT_TEST, x1=pd.Timestamp(config.DATE_FIN_TEST) + pd.DateOffset(months=1),
-        layer="below", line_width=0, fillcolor=COULEUR_TEST, opacity=OPACITE_TEST,
-    )
-    nb_blocs = len(config.PERIODES_VALIDATION)
-    debut_validation = config.PERIODES_VALIDATION[0][0]
-    fin_validation = config.PERIODES_VALIDATION[-1][1]
+    for numero, (debut, fin) in enumerate(config.PERIODES_TEST.values()):
+        figure.add_vrect(
+            x0=debut, x1=pd.Timestamp(fin) + pd.DateOffset(months=1), layer="below", line_width=0,
+            fillcolor=COULEUR_TEST, opacity=OPACITES_TEST[numero % 2],
+        )
     legendes = [
-        (COULEUR_VALIDATION, OPACITES_VALIDATION[1],
-         f"Validation ({nb_blocs} blocs, {formater_mois(debut_validation)} à "
-         f"{formater_mois(fin_validation)})"),
-        (COULEUR_TEST, OPACITE_TEST,
-         f"Test ({formater_mois(config.DATE_DEBUT_TEST)} à {formater_mois(config.DATE_FIN_TEST)})"),
+        (COULEUR_VALIDATION, OPACITES_VALIDATION[1], libelle_periode(config.PERIODE_VALIDATION)),
+        (COULEUR_TEST, OPACITES_TEST[1],
+         f"Test ({len(config.PERIODES_TEST)} périodes, {formater_mois(config.DATE_DEBUT_TEST)} à "
+         f"{formater_mois(config.DATE_FIN_TEST)})"),
     ]
     for couleur, opacite, nom in legendes:
         figure.add_trace(go.Scatter(
@@ -592,7 +613,7 @@ def ajouter_valeurs_estimees(figure, series, liste_series):
 
 
 def graphique_comparaison(series, liste_series, titre=None, hauteur=480):
-    """Prix de plusieurs séries sur un même graphique (comparaison de provinces ou de toutes les séries).
+    """Prix de plusieurs séries sur un même graphique (comparaison des deux séries).
 
     series : DataFrame au format de data/series.csv.
     """
@@ -609,19 +630,35 @@ def graphique_comparaison(series, liste_series, titre=None, hauteur=480):
     return ajouter_selecteur_periode(figure)
 
 
-def graphique_decomposition(decomposition, titre=None, hauteur=720):
-    """Décomposition en 4 panneaux superposés : observé, tendance, saisonnalité, résidu.
+def graphique_decomposition(decomposition, titre=None, hauteur=760):
+    """Décomposition en 4 panneaux superposés : observé et série désaisonnalisée,
+    tendance, saisonnalité, résidu.
 
-    decomposition : DataFrame avec les colonnes date, observe, tendance, saisonnier, residu.
+    decomposition : DataFrame avec les colonnes date, observe, desaisonnalise,
+    tendance, saisonnier, residu (desaisonnalise = observe - saisonnier).
     """
-    panneaux = [("observe", "Observé"), ("tendance", "Tendance"),
+    panneaux = [("observe", "Observé et série désaisonnalisée"), ("tendance", "Tendance"),
                 ("saisonnier", "Saisonnalité"), ("residu", "Résidu")]
     figure = make_subplots(rows=len(panneaux), cols=1, shared_xaxes=True, vertical_spacing=0.04,
                            subplot_titles=[nom for _, nom in panneaux])
     for rang, (colonne, nom) in enumerate(panneaux, start=1):
+        if colonne == "observe":
+            # Série observée et série désaisonnalisée superposées, avec légende
+            figure.add_trace(go.Scatter(
+                x=decomposition["date"], y=decomposition["observe"], mode="lines", name="Observé",
+                line=dict(color=COULEUR_OBSERVE, width=1.5),
+                hovertemplate="%{y:,.2f} $<extra>Observé</extra>",
+            ), row=rang, col=1)
+            figure.add_trace(go.Scatter(
+                x=decomposition["date"], y=decomposition["desaisonnalise"], mode="lines",
+                name="Désaisonnalisée (observé − saisonnalité)",
+                line=dict(color=COULEUR_DESAISONNALISEE, width=1.5, dash="dash"),
+                hovertemplate="%{y:,.2f} $<extra>Désaisonnalisée</extra>",
+            ), row=rang, col=1)
+            continue
         figure.add_trace(go.Scatter(
             x=decomposition["date"], y=decomposition[colonne], mode="lines", name=nom,
-            line=dict(color=COULEUR_OBSERVE if colonne == "observe" else "#0072B2", width=1.5),
+            line=dict(color="#0072B2", width=1.5),
             hovertemplate=f"%{{y:,.2f}} $<extra>{nom}</extra>", showlegend=False,
         ), row=rang, col=1)
         if colonne in ("saisonnier", "residu"):
@@ -635,7 +672,7 @@ def graphique_decomposition(decomposition, titre=None, hauteur=720):
 
 
 def graphique_previsions_reel(previsions, modeles, titre=None, hauteur=480):
-    """Valeurs réelles et prévisions de plusieurs modèles sur la période de test.
+    """Valeurs réelles et prévisions de plusieurs modèles sur une période évaluée.
 
     previsions : lignes de previsions.csv pour une série et un horizon.
     """

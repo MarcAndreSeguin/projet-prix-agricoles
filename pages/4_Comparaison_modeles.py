@@ -1,11 +1,11 @@
-"""Page Comparaison des modèles : métriques par horizon, couverture des intervalles et
-tests de Diebold-Mariano, pour la série choisie et une période (test par défaut, ou
-validation, où le modèle final est choisi). Les deux périodes ne sont jamais mélangées.
+"""Page Comparaison des modèles : métriques par horizon et couverture des intervalles,
+pour la série choisie et une période (test global par défaut, test 1, test 2, test 3,
+ou validation, où le modèle final est choisi). Validation et test ne sont jamais mélangés.
 
 - tableau des métriques (MAE, RMSE, MAPE) par modèle et par horizon, meilleure valeur mise en évidence ;
-- tableau des tests de Diebold-Mariano ;
 - couverture réelle des intervalles contre la couverture visée ;
-- prévisions contre valeurs réelles sur la période de test.
+- MAE de chaque modèle par période de test (test 1, test 2, test 3), en tableau et en graphique ;
+- prévisions contre valeurs réelles sur la période choisie.
 """
 
 import pandas as pd
@@ -17,22 +17,16 @@ from src import interface_commune as ic
 ic.configurer_page("Comparaison des modèles")
 ic.exiger_series()
 metriques = ic.exiger_resultat("metriques")
-tests_dm = ic.exiger_resultat("tests_dm")
 previsions = ic.exiger_resultat("previsions")
 selection = ic.panneau_lateral(avec_modele=False, avec_niveau=False)
 libelle = ic.libelle_serie(selection.serie)
 
 st.title("Comparaison des modèles")
-PERIODES = {
-    "test": f"Test ({ic.formater_mois(config.DATE_DEBUT_TEST)} à "
-            f"{ic.formater_mois(config.DATE_FIN_TEST)})",
-    "validation": f"Validation ({len(config.PERIODES_VALIDATION)} blocs, "
-                  f"{ic.formater_mois(config.PERIODES_VALIDATION[0][0])} à "
-                  f"{ic.formater_mois(config.PERIODES_VALIDATION[-1][1])})",
-}
-periode = st.radio("Période évaluée", list(PERIODES), format_func=PERIODES.get, horizontal=True,
-                   key="comparaison_periode")
-m = metriques[(metriques["serie"] == selection.serie) & (metriques["periode"] == periode)]
+PERIODES = {periode: ic.libelle_periode(periode) for periode in ic.PERIODES_AFFICHEES}
+periode = st.selectbox("Période évaluée", list(PERIODES), format_func=PERIODES.get,
+                       key="comparaison_periode")
+metriques_serie = metriques[metriques["serie"] == selection.serie]
+m = metriques_serie[metriques_serie["periode"] == periode]
 if m.empty:
     st.error(f"Aucune métrique pour {libelle} sur cette période dans resultats/metriques.csv.")
     st.stop()
@@ -66,34 +60,9 @@ style = tableau.style.apply(ic.style_meilleur, axis=0).format(lambda v: ic.forma
 st.dataframe(style, use_container_width=True)
 n = m["n"]
 st.caption(f"Meilleure valeur (la plus faible) de chaque colonne en gras sur fond bleu. "
-           f"★ : modèle final selon la règle du protocole. "
-           f"Nombre de prévisions évaluées par modèle et horizon : {int(n.min())} à {int(n.max())}.")
-
-# ---------------------------------------------------------------------------
-# Tests de Diebold-Mariano
-# ---------------------------------------------------------------------------
-st.header("Tests de Diebold-Mariano")
-d = tests_dm[(tests_dm["serie"] == selection.serie) & (tests_dm["periode"] == periode)]
-d = d.sort_values(["horizon", "modele_a", "modele_b"])
-seulement_naif = st.checkbox("Afficher seulement les comparaisons avec le modèle naïf",
-                             key="comparaison_naif")
-if seulement_naif:
-    d = d[(d["modele_a"] == config.MODELE_REFERENCE) | (d["modele_b"] == config.MODELE_REFERENCE)]
-tableau_dm = pd.DataFrame({
-    "Horizon": d["horizon"].map(config.LIBELLES_HORIZONS),
-    "Modèle A": d["modele_a"].map(ic.libelle_modele),
-    "Modèle B": d["modele_b"].map(ic.libelle_modele),
-    "Statistique DM": d["stat_dm"].map(lambda v: ic.formater_nombre(v, 3)),
-    "p-valeur": d["p_valeur"].map(lambda v: ic.formater_nombre(v, 4)),
-    "Significatif (5 %)": (d["p_valeur"] < config.SEUIL_DM).map({True: "Oui", False: "Non"}),
-    "Meilleur": d["meilleur"].map(lambda x: "aucun" if x == "aucun" else ic.libelle_modele(x)),
-})
-if d.empty:
-    st.caption("Aucun test : au moins deux modèles sont nécessaires.")
-else:
-    st.dataframe(tableau_dm, hide_index=True, use_container_width=True)
-st.caption("Perte absolue, correction de Harvey, Leybourne et Newbold. Statistique négative : "
-           "le modèle A a une erreur absolue moyenne plus faible que le modèle B.")
+           f"★ : modèle final selon la règle du protocole (plus faible MAE moyenne sur la "
+           f"validation). Nombre de prévisions évaluées par modèle et horizon : "
+           f"{int(n.min())} à {int(n.max())}.")
 
 # ---------------------------------------------------------------------------
 # Couverture des intervalles
@@ -119,6 +88,44 @@ st.caption("Couverture réelle : proportion des prix observés situés dans l'in
            "La ligne pointillée indique la couverture visée.")
 
 # ---------------------------------------------------------------------------
+# MAE par période de test
+# ---------------------------------------------------------------------------
+st.header("MAE par période de test")
+MOYENNE = "moyenne"
+choix_horizons = [MOYENNE] + config.HORIZONS
+horizon_mae = st.selectbox(
+    "Horizon", choix_horizons, key="comparaison_horizon_mae",
+    format_func=lambda h: "Moyenne des horizons" if h == MOYENNE else config.LIBELLES_HORIZONS[h],
+)
+mt = metriques_serie[metriques_serie["periode"].isin(list(config.PERIODES_TEST))]
+if horizon_mae != MOYENNE:
+    mt = mt[mt["horizon"] == horizon_mae]
+mae_tests = mt.groupby(["modele", "periode"], as_index=False)["mae"].mean()
+modeles_tests = [x for x in config.MODELES if x in set(mae_tests["modele"])]
+
+tableau_tests = (mae_tests.pivot(index="modele", columns="periode", values="mae")
+                 .reindex(index=modeles_tests, columns=list(config.PERIODES_TEST)))
+tableau_tests.columns = [ic.libelle_periode(p) for p in tableau_tests.columns]
+tableau_tests.index = [nom_ligne(x) for x in tableau_tests.index]
+tableau_tests.index.name = "Modèle"
+st.dataframe(tableau_tests.style.format(lambda v: ic.formater_nombre(v, 2)),
+             use_container_width=True)
+
+donnees_tests = mae_tests.assign(
+    periode_libelle=mae_tests["periode"].map(lambda p: ic.libelle_periode(p, avec_dates=False)),
+    ordre_modele=mae_tests["modele"].map({x: i for i, x in enumerate(modeles_tests)}),
+    ordre_periode=mae_tests["periode"].map({p: i for i, p in enumerate(config.PERIODES_TEST)}),
+).sort_values(["ordre_modele", "ordre_periode"])
+figure = ic.graphique_barres(donnees_tests, x="periode_libelle", y="mae", couleur="modele",
+                             titre_y="MAE ($/tonne)")
+ic.afficher_graphique(figure)
+st.caption("MAE en dollars par tonne, calculée séparément sur chaque période de test de 24 mois "
+           + ("(moyenne des MAE aux trois horizons)." if horizon_mae == MOYENNE
+              else f"(horizon {config.LIBELLES_HORIZONS[horizon_mae]}).")
+           + " Les périodes : " + " ; ".join(ic.libelle_periode(p) for p in config.PERIODES_TEST)
+           + ".")
+
+# ---------------------------------------------------------------------------
 # Prévisions contre valeurs réelles
 # ---------------------------------------------------------------------------
 st.header("Prévisions et valeurs réelles sur la période évaluée")
@@ -127,8 +134,8 @@ horizon = c1.radio("Horizon", config.HORIZONS, format_func=config.LIBELLES_HORIZ
                    horizontal=True, key="comparaison_horizon")
 modeles_affiches = c2.multiselect("Modèles", modeles, default=modeles,
                                   format_func=ic.libelle_modele, key="comparaison_modeles")
-p = previsions[(previsions["serie"] == selection.serie) & (previsions["horizon"] == horizon)
-               & (previsions["periode"] == periode) & previsions["reel"].notna()]
+p = ic.filtrer_periode(previsions, periode)
+p = p[(p["serie"] == selection.serie) & (p["horizon"] == horizon) & p["reel"].notna()]
 ic.afficher_graphique(ic.graphique_previsions_reel(p, modeles_affiches))
 st.caption(f"Chaque point est la prévision faite {config.PAS_PAR_HORIZON[horizon]} mois avant la "
            "date cible (horizon de consultation "

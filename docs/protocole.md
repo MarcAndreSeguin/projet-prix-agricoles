@@ -3,27 +3,47 @@ Projet de session en équipe de trois. Remise du rapport : 22 novembre 2026.
 Client : analyste d'une coopérative ou d'une association de producteurs, qui suit les prix pour conseiller ses membres et doit repérer les mouvements de prix anormaux.
 Données : Statistique Canada, tableau 32-10-0077-01 (prix des produits agricoles, mensuel, $/tonne), Licence du gouvernement ouvert – Canada. Fichiers sources versionnés : data/mais.csv et data/canola.csv (extraits du tableau, cp1252, dates mois/jour/année).
 
-## Séries (4)
-- mais_QC, mais_ON : maïs-grain, Québec et Ontario
-- canola_SK, canola_AB : canola (y compris le colza), Saskatchewan et Alberta. Le canola au Québec ne commence qu'en 2000-01 ; les Prairies permettent une période commune plus longue.
+## Séries (2)
+- mais_ON : maïs-grain, Ontario
+- canola_SK : canola (y compris le colza), Saskatchewan
+- Choix des provinces (décision de l'équipe) : ce sont les principales provinces productrices de ces cultures, et les provinces voisines (Québec pour le maïs-grain, Alberta pour le canola) ont des marchés pratiquement jumeaux. Le Québec et l'Alberta ne sont donc pas retenus.
 - Période commune : 1985-01 à 2026-08 (500 mois, aucun mois absent).
-- Une seule valeur manquante : canola_AB 2012-05, estimée par interpolation linéaire (moyenne d'avril et de juin 2012) et signalée dans la colonne prix_impute.
+- Aucune valeur manquante dans les deux séries retenues : aucune valeur n'est estimée. La seule valeur manquante des fichiers sources (canola, Alberta, 2012-05) appartient à une série non retenue. La colonne prix_impute est conservée dans le contrat (toutes ses valeurs valent False).
 - La rupture d'août 2012 (fin du monopole de la Commission canadienne du blé) ne touche pas ces séries.
 - Prétraitement détaillé : notebooks/01_pretraitement.ipynb. Fichier commun aux trois méthodes : data/series.csv, produit par scripts/preparer_donnees.py.
 
 ## Décisions méthodologiques
 - Modèles : naïf (référence), ETS/Holt-Winters, SARIMA ; une personne par modèle (Sabra : naïf, Hanane : ETS, Marc : SARIMA)
-- Découpage chronologique (structure proposée dans le notebook de prétraitement, test allongé et six blocs de validation proposés par Marc, **à valider par l'équipe**) : entraînement depuis 1985-01 ; six validations contiguës de 12 mois avec entraînement croissant, de 2017-09 à 2023-08 (2017-09 à 2018-08, 2018-09 à 2019-08, 2019-09 à 2020-08, 2020-09 à 2021-08, 2021-09 à 2022-08, 2022-09 à 2023-08) ; test final réservé de 2023-09 à 2026-08 (36 mois). Mêmes périodes pour les quatre séries et les trois méthodes.
-- Pourquoi six blocs de validation : avec trois blocs (2020-09 à 2023-08), la validation était dominée par la flambée de 2021-2022 (hausse de +42 % à +63 % sur le premier bloc), alors que le test 2023-09 à 2026-08 est plutôt stable (de −6 % à +3 %). Les six années précédant le test couvrent un régime stable (2017-2020), la flambée, le sommet de 2022 et le début de la baisse. Les erreurs de validation sont aussi rapportées bloc par bloc (src/evaluation.py, numero_periode_validation()) pour montrer l'effet du régime.
-- Pourquoi 36 mois de test plutôt que 12 : le test de Diebold-Mariano (src/evaluation.py) exige au moins 2 × pas + 1 erreurs, soit 7, 11 et 17 aux horizons 1, 3 et 6 mois. Avec 12 mois de test, il est impossible à 6 mois, alors que la règle de sélection (battre le naïf) en dépend. Avec 36 mois, il est calculable à tous les horizons, et le classement ne repose plus sur une seule année. Le notebook de prétraitement garde pour l'instant le découpage d'origine (12 mois de test) ; à mettre à jour si l'équipe retient ce choix.
-- Parcours de chaque période (choix proposé par Marc, **à valider par l'équipe**) : origine glissante, modèle réestimé à chaque origine. Les 12 mois d'une période sont des mois **cibles** : chaque mois cible est prévu à chaque horizon depuis l'origine date_cible − pas (pas = horizon + délai de publication). Exemple : cible 2023-01 à l'horizon 6 mois (8 pas) → origine 2022-05, entraînement de 1985-01 à 2022-05. Les origines peuvent précéder la période, mais aucune cible n'en sort, donc pas de fuite vers la validation suivante ni vers le test. Avec 3 horizons, cela donne 12 erreurs par horizon, par série et par période, soit 72 en validation (6 blocs) et 36 en test. Fonction commune : src/evaluation.py, generer_paires_origine_cible().
+- Découpage chronologique (décision de l'équipe), défini par mois **cibles**, commun aux deux séries et aux trois méthodes (src/config.py) :
+
+| Période | Mois cibles | Mois | Rôle |
+| :--- | :--- | ---: | :--- |
+| Entraînement | depuis 1985-01, fenêtre croissante jusqu'à chaque origine | – | estimation des modèles |
+| validation | 6 blocs de 12 mois : 2014-09 à 2015-08, 2015-09 à 2016-08, 2016-09 à 2017-08, 2017-09 à 2018-08, 2018-09 à 2019-08, 2019-09 à 2020-08 | 72 | choix du modèle final |
+| test_1 | 2020-09 à 2022-08 | 24 | performances rapportées |
+| test_2 | 2022-09 à 2024-08 | 24 | performances rapportées |
+| test_3 | 2024-09 à 2026-08 | 24 | performances rapportées |
+| test_global | 2020-09 à 2026-08 (test_1 + test_2 + test_3) | 72 | bilan sur l'ensemble des trois tests |
+
+- Parcours de chaque période : origine glissante, modèle réestimé à chaque origine. Chaque mois cible est prévu à chaque horizon depuis l'origine date_cible − pas (pas = horizon + délai de publication). Exemple : cible 2023-01 à l'horizon 6 mois (8 pas) → origine 2022-05, entraînement de 1985-01 à 2022-05. Les origines peuvent précéder la période, mais aucune cible n'en sort : chaque prévision appartient à une seule période (validation, test_1, test_2 ou test_3). Par série, modèle et horizon : 72 prévisions en validation, 24 par période de test, 72 pour test_global. Fonctions communes : src/evaluation.py, generer_paires_origine_cible() et generer_paires_evaluation().
+- Les erreurs de validation peuvent aussi être rapportées bloc par bloc (src/evaluation.py, numero_periode_validation()).
+- Pas de test de Diebold-Mariano (décision de l'équipe) : les métriques des trois méthodes sont présentées clairement pour chaque période.
+
+### Métriques
+Pour chaque série, modèle, horizon et période (validation, test_1, test_2, test_3, test_global), sans jamais mélanger validation et test ; y_t est le prix observé au mois cible t, ŷ_t la prévision en dollars, [L_t, U_t] l'intervalle de niveau c, n le nombre de mois cibles :
+- MAE = (1/n) Σ |y_t − ŷ_t| ($/tonne)
+- RMSE = √[(1/n) Σ (y_t − ŷ_t)²] ($/tonne)
+- MAPE = (100/n) Σ |y_t − ŷ_t| / |y_t| (%)
+- couverture80, couverture95 = (1/n) Σ 1{L_t ≤ y_t ≤ U_t}, proportion des prix observés dans l'intervalle à 80 % ou 95 %
+- test_global est calculé sur l'ensemble des prévisions de test_1, test_2 et test_3 (et non comme la moyenne des trois périodes).
+
+### Modèle final (décision de l'équipe)
+- Pour chaque série : plus faible MAE moyenne sur les horizons (1, 3 et 6 mois), calculée sur la période de validation uniquement. Le naïf est retenu s'il est le meilleur (en cas d'égalité, le naïf est préféré). Les périodes de test ne servent qu'à rapporter les performances. Fonction : src/evaluation.py, choisir_modele_final().
 
 ### À confirmer par l'équipe (repris de la première version du protocole)
 - Transformation : log des prix nominaux ; prévisions affichées en dollars
-- Délai de publication : environ 2 mois. Horizons « consultation » 1, 3, 6 mois = 3, 5, 8 pas après la dernière donnée. Les mois de validation et de test étant des mois cibles, chaque horizon est évalué sur les mêmes 12 mois par période (les origines à 8 pas commencent 8 mois avant la période).
-- Métriques : MAE, RMSE, MAPE par horizon ; test de Diebold-Mariano ; taux de couverture des intervalles
+- Délai de publication : environ 2 mois. Horizons « consultation » 1, 3, 6 mois = 3, 5, 8 pas après la dernière donnée. Les mois de validation et de test étant des mois cibles, chaque horizon est évalué sur les mêmes mois par période (les origines à 8 pas commencent 8 mois avant la période).
 - Intervalles : 80 % (affichage), 95 % (alertes)
-- Modèle final : plus faible MAE moyenne sur les horizons, à condition de battre le naïf (Diebold-Mariano, 5 %) ; règle appliquée sur la période de validation uniquement, performances rapportées sur le test (**Proposition – à valider par l'équipe**)
 - Alerte : prix observé hors de l'intervalle à 95 % de la prévision à l'horizon 1
 
 ## Contrat des fichiers (ne pas modifier sans accord de l'équipe)
@@ -31,11 +51,12 @@ Données : Statistique Canada, tableau 32-10-0077-01 (prix des produits agricole
 - resultats/previsions.csv : serie, modele, periode, date_origine, date_cible, horizon, prevision, inf80, sup80, inf95, sup95, reel
 - resultats/previsions_futures.csv : mêmes colonnes sans periode ni reel, date_origine = dernière donnée
 - resultats/metriques.csv : modele, serie, periode, horizon, mae, rmse, mape, couverture80, couverture95, n
-- resultats/tests_dm.csv : serie, periode, horizon, modele_a, modele_b, stat_dm, p_valeur, meilleur
-- Colonne periode (**Proposition – à valider par l'équipe**) : « validation » (mois cibles des six blocs de validation) ou « test » (mois cibles du test final). Les métriques et les tests de Diebold-Mariano sont calculés séparément pour chaque période, sans jamais les mélanger. La règle du modèle final est appliquée sur la période de validation uniquement ; les performances sont rapportées sur le test.
+- Colonne periode :
+  - previsions.csv : validation, test_1, test_2 ou test_3 ; chaque prévision n'apparaît qu'une fois ;
+  - metriques.csv : les mêmes valeurs, plus test_global, calculé sur l'ensemble des trois périodes de test.
 - date_origine = dernier mois de données connu ; horizon ∈ {1, 3, 6}
 - Valeurs de modele : naif, ets, sarima
-- Valeurs de serie : mais_QC, mais_ON, canola_SK, canola_AB
+- Valeurs de serie : mais_ON, canola_SK
 
 ## Interface commune des modèles (Proposition – à valider par l'équipe)
 - Chaque modèle est un module src/modeles/<modele>.py (naif, ets, sarima) qui expose la même fonction :

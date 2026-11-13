@@ -4,21 +4,23 @@ Usage : python scripts/executer_evaluation.py [--modeles naif ets sarima]
 
 Déroulement, pour chaque série de config.LISTE_SERIES et chaque modèle disponible :
 1. paires origine-cible des six blocs de validation (config.PERIODES_VALIDATION,
-   periode = « validation ») et du test final (config.DATE_DEBUT_TEST à
-   config.DATE_FIN_TEST, periode = « test »), produites par
-   src/evaluation.py, generer_paires_origine_cible() : chaque mois d'une période
-   est un mois cible, prévu à chaque horizon depuis date_cible - pas ;
+   periode = « validation ») et des trois périodes de test (config.PERIODES_TEST,
+   periode = « test_1 », « test_2 », « test_3 »), produites par
+   src/evaluation.py, generer_paires_evaluation() : chaque mois d'une période
+   est un mois cible, prévu à chaque horizon depuis date_cible - pas, et chaque
+   prévision n'appartient qu'à une seule période ;
 2. à chaque origine, appel de prevoir(historique, pas) sur le log des prix
    connus jusqu'à l'origine incluse (fenêtre croissante depuis le début de la
    série) : le modèle est réestimé à chaque origine et ne voit aucune donnée
    postérieure. Une origine qui sert à plusieurs périodes (par exemple une
-   cible de validation à 3 pas et une cible de test à 8 pas) n'est estimée
+   cible de test_1 à 3 pas et une cible de test_2 à 8 pas) n'est estimée
    qu'une fois ;
 3. retour en dollars par exponentielle et ajout du prix observé (reel) ;
 4. prévisions futures : origine = dernière donnée, historique complet,
    pas de config.PAS_PAR_HORIZON ;
-5. métriques et tests de Diebold-Mariano par période (src/evaluation.py), sans
-   jamais mélanger validation et test.
+5. métriques par période (src/evaluation.py, calculer_metriques()) : validation,
+   test_1, test_2, test_3, plus test_global calculé sur l'ensemble des trois
+   périodes de test ; validation et test ne sont jamais mélangés.
 
 Retour en dollars
 -----------------
@@ -59,11 +61,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src import config  # noqa: E402
 from src.chargement import charger_series, verifier_colonnes  # noqa: E402
-from src.evaluation import (  # noqa: E402
-    calculer_metriques,
-    calculer_tests_dm,
-    generer_paires_origine_cible,
-)
+from src.evaluation import calculer_metriques, generer_paires_evaluation  # noqa: E402
 
 COLONNES_MODELE = ["pas", "prevision", "inf80", "sup80", "inf95", "sup95"]
 COLONNES_PRIX = ["prevision", "inf80", "sup80", "inf95", "sup95"]
@@ -108,24 +106,6 @@ def appeler(prevoir, nom, serie, historique, pas):
     if resultat[COLONNES_PRIX].isna().any().any():
         raise ValueError(f"{contexte} : valeurs manquantes dans les prévisions")
     return resultat
-
-
-# ---------------------------------------------------------------------------
-# Paires origine-cible
-# ---------------------------------------------------------------------------
-def paires_a_evaluer():
-    """Paires origine-cible des blocs de validation et du test, avec leur période."""
-    morceaux = [
-        generer_paires_origine_cible(debut, fin).assign(periode="validation")
-        for debut, fin in config.PERIODES_VALIDATION
-    ]
-    morceaux.append(generer_paires_origine_cible(config.DATE_DEBUT_TEST, config.DATE_FIN_TEST)
-                    .assign(periode="test"))
-    paires = pd.concat(morceaux, ignore_index=True)
-    doublons = paires.duplicated(["date_cible", "horizon"])
-    if doublons.any():
-        raise ValueError("Un même mois cible appartient à deux périodes : vérifier le découpage")
-    return paires
 
 
 # ---------------------------------------------------------------------------
@@ -184,12 +164,13 @@ def mettre_en_forme(tableau, colonnes, tri):
 
 
 def ecrire(fichiers):
-    """Vérifie les colonnes de chaque tableau, puis écrit (nom temporaire, puis renommage)."""
-    for chemin, (tableau, colonnes) in fichiers.items():
-        verifier_colonnes(tableau, colonnes, chemin.name)
+    """Vérifie les colonnes et les périodes de chaque tableau, puis écrit (nom
+    temporaire, puis renommage)."""
+    for chemin, (tableau, colonnes, periodes) in fichiers.items():
+        verifier_colonnes(tableau, colonnes, chemin.name, periodes)
     config.DOSSIER_RESULTATS.mkdir(parents=True, exist_ok=True)
     temporaires = {}
-    for chemin, (tableau, _) in fichiers.items():
+    for chemin, (tableau, _, _) in fichiers.items():
         temporaire = chemin.with_name(chemin.name + ".tmp")
         tableau.to_csv(temporaire, index=False, encoding="utf-8")
         temporaires[chemin] = temporaire
@@ -213,7 +194,7 @@ def main():
         serie: series.loc[series["serie"] == serie].set_index("date")["prix"].asfreq("MS")
         for serie in config.LISTE_SERIES
     }
-    paires = paires_a_evaluer()
+    paires = generer_paires_evaluation()
 
     # Modèles disponibles : appel d'essai sur l'historique de la première origine évaluée
     # (même longueur minimale que dans l'évaluation, pour ne pas pénaliser les modèles saisonniers)
@@ -243,28 +224,26 @@ def main():
     previsions = pd.concat(morceaux, ignore_index=True)
     previsions_futures = pd.concat(futurs, ignore_index=True)
 
-    # Métriques et tests par période, calculés avant l'arrondi des prix
+    # Métriques par période (et test_global), calculées avant l'arrondi des prix
     metriques = calculer_metriques(previsions)
-    tests_dm = calculer_tests_dm(previsions, modeles=list(modeles))
     metriques = metriques.round({c: DECIMALES_METRIQUES for c in
                                  ["mae", "rmse", "mape", "couverture80", "couverture95"]})
-    tests_dm = tests_dm.round({"stat_dm": DECIMALES_METRIQUES, "p_valeur": DECIMALES_METRIQUES})
+    ordre_periodes = {periode: rang for rang, periode in enumerate(config.PERIODES_METRIQUES)}
 
     fichiers = {
         config.FICHIER_PREVISIONS: (
             mettre_en_forme(previsions, config.COLONNES_PREVISIONS,
-                            ["serie", "modele", "periode", "date_cible", "horizon"]),
-            config.COLONNES_PREVISIONS),
+                            ["serie", "modele", "date_cible", "horizon"]),
+            config.COLONNES_PREVISIONS, config.PERIODES_PREVISIONS),
         config.FICHIER_PREVISIONS_FUTURES: (
             mettre_en_forme(previsions_futures, config.COLONNES_PREVISIONS_FUTURES,
                             ["serie", "modele", "horizon"]),
-            config.COLONNES_PREVISIONS_FUTURES),
+            config.COLONNES_PREVISIONS_FUTURES, None),
         config.FICHIER_METRIQUES: (
-            metriques.sort_values(["serie", "modele", "periode", "horizon"]).reset_index(drop=True),
-            config.COLONNES_METRIQUES),
-        config.FICHIER_TESTS_DM: (
-            tests_dm.sort_values(["serie", "periode", "horizon"]).reset_index(drop=True),
-            config.COLONNES_TESTS_DM),
+            metriques.sort_values(["serie", "modele", "periode", "horizon"],
+                                  key=lambda c: c.map(ordre_periodes) if c.name == "periode" else c)
+            .reset_index(drop=True),
+            config.COLONNES_METRIQUES, config.PERIODES_METRIQUES),
     }
     print("\nÉcriture")
     ecrire(fichiers)
@@ -276,7 +255,7 @@ def main():
     print("\nRésumé")
     print("  Modèles exécutés :", ", ".join(modeles))
     print("  Modèles ignorés :", ", ".join(ignores) or "aucun")
-    for periode, nombre in previsions.groupby("periode").size().reindex(config.PERIODES_RESULTATS).items():
+    for periode, nombre in previsions.groupby("periode").size().reindex(config.PERIODES_PREVISIONS).items():
         print(f"  Prévisions ({periode}) : {int(nombre)}")
     print(f"  Prévisions futures : {len(previsions_futures)}")
     print(f"  Durée : {time.perf_counter() - debut_chrono:.1f} s")

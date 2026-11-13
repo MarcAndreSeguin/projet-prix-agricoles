@@ -1,23 +1,18 @@
-"""Métriques (MAE, RMSE, MAPE), couverture des intervalles et test de Diebold-Mariano.
+"""Paires origine-cible, métriques (MAE, RMSE, MAPE), couverture des intervalles et
+choix du modèle final.
 
 Conventions :
 - mape est exprimée en pourcentage ; couverture80 et couverture95 en proportion (0 à 1) ;
-- le test de Diebold-Mariano utilise la perte absolue (cohérente avec le critère
-  de sélection fondé sur la MAE), une variance de long terme avec h - 1 retards,
-  où h est le nombre de pas entre l'origine et la cible, et la correction de
-  Harvey, Leybourne et Newbold (1997) avec une loi de Student à n - 1 degrés de liberté ;
-- stat_dm < 0 signifie que modele_a a une perte moyenne plus faible que modele_b ;
-- meilleur vaut le modèle à plus faible perte si p_valeur < config.SEUIL_DM, sinon « aucun » ;
-- métriques et tests sont calculés séparément pour chaque période (colonne periode :
-  validation ou test), sans jamais mélanger les deux ; la règle du modèle final
-  s'applique sur config.PERIODE_SELECTION (validation).
+- chaque prévision appartient à une seule période de previsions.csv
+  (config.PERIODES_PREVISIONS : validation, test_1, test_2, test_3) ;
+- les métriques sont calculées séparément pour chaque période, plus test_global,
+  calculé sur l'ensemble des prévisions de test_1, test_2 et test_3
+  (config.COMPOSITION_PERIODES) ; validation et test ne sont jamais mélangés ;
+- la règle du modèle final s'applique sur config.PERIODE_SELECTION (validation).
 """
-
-from itertools import combinations
 
 import numpy as np
 import pandas as pd
-from scipy import stats
 
 from src import config
 
@@ -48,6 +43,43 @@ def generer_paires_origine_cible(debut, fin, horizons=config.HORIZONS):
     return paires.sort_values(["date_origine", "date_cible"]).reset_index(drop=True)
 
 
+def bornes_periodes():
+    """Mois cibles (début, fin) de chaque période de previsions.csv.
+
+    La validation est découpée en blocs (config.PERIODES_VALIDATION) ; chaque
+    période de test est un seul intervalle (config.PERIODES_TEST).
+    Retourne une liste de (periode, debut, fin).
+    """
+    bornes = [(config.PERIODE_VALIDATION, debut, fin) for debut, fin in config.PERIODES_VALIDATION]
+    bornes += [(periode, debut, fin) for periode, (debut, fin) in config.PERIODES_TEST.items()]
+    return bornes
+
+
+def periode_de(date_cible):
+    """Période de previsions.csv d'un mois cible (validation, test_1, ...), ou None."""
+    date_cible = pd.Timestamp(date_cible)
+    for periode, debut, fin in bornes_periodes():
+        if pd.Timestamp(debut) <= date_cible <= pd.Timestamp(fin):
+            return periode
+    return None
+
+
+def generer_paires_evaluation(horizons=config.HORIZONS):
+    """Paires origine-cible de toutes les périodes, avec la colonne periode.
+
+    Chaque couple (date_cible, horizon) n'apparaît qu'une fois : lève ValueError
+    si un mois cible appartient à deux périodes.
+    """
+    paires = pd.concat(
+        [generer_paires_origine_cible(debut, fin, horizons).assign(periode=periode)
+         for periode, debut, fin in bornes_periodes()],
+        ignore_index=True,
+    )
+    if paires.duplicated(["date_cible", "horizon"]).any():
+        raise ValueError("Un même mois cible appartient à deux périodes : vérifier le découpage")
+    return paires
+
+
 def numero_periode_validation(date_cible):
     """Numéro (1 à len(PERIODES_VALIDATION)) du bloc de validation d'une date cible.
 
@@ -69,19 +101,36 @@ def origines_a_estimer(debut, fin, horizons=config.HORIZONS):
 def _exiger_periode(previsions):
     """Lève ValueError si la colonne periode est absente ou contient une valeur inconnue."""
     if "periode" not in previsions:
-        raise ValueError("previsions doit contenir la colonne periode (validation ou test)")
-    inconnues = set(previsions["periode"].dropna()) - set(config.PERIODES_RESULTATS)
+        raise ValueError(f"previsions doit contenir la colonne periode ({config.PERIODES_PREVISIONS})")
+    inconnues = set(previsions["periode"].dropna()) - set(config.PERIODES_PREVISIONS)
     if inconnues or previsions["periode"].isna().any():
         raise ValueError(f"Valeurs de periode non conformes : {sorted(inconnues) or 'manquantes'}")
 
 
+def filtrer_periode(tableau, periode):
+    """Lignes de previsions.csv couvertes par une période de metriques.csv.
+
+    test_global regroupe test_1, test_2 et test_3 ; les autres périodes se
+    couvrent elles-mêmes.
+    """
+    return tableau[tableau["periode"].isin(config.COMPOSITION_PERIODES[periode])]
+
+
 def calculer_metriques(previsions):
-    """Calcule les métriques par modèle, série, période et horizon (format de metriques.csv)."""
+    """Calcule les métriques par modèle, série, période et horizon (format de metriques.csv).
+
+    Périodes : celles de previsions.csv, plus test_global (union des trois
+    périodes de test).
+    """
     _exiger_periode(previsions)
     p = previsions.dropna(subset=["reel"]).copy()
     p["erreur"] = p["reel"] - p["prevision"]
     p["dans80"] = (p["reel"] >= p["inf80"]) & (p["reel"] <= p["sup80"])
     p["dans95"] = (p["reel"] >= p["inf95"]) & (p["reel"] <= p["sup95"])
+    p = pd.concat(
+        [filtrer_periode(p, periode).assign(periode=periode) for periode in config.PERIODES_METRIQUES],
+        ignore_index=True,
+    )
 
     def resumer(g):
         e = g["erreur"]
@@ -103,87 +152,25 @@ def calculer_metriques(previsions):
     return metriques[config.COLONNES_METRIQUES]
 
 
-def test_diebold_mariano(erreurs_a, erreurs_b, pas):
-    """Test de Diebold-Mariano (perte absolue, correction HLN).
-
-    erreurs_a, erreurs_b : erreurs alignées sur les mêmes origines.
-    pas : nombre de pas entre l'origine et la cible.
-    Retourne (stat_dm, p_valeur) ; (nan, nan) si le test n'est pas calculable.
-    """
-    d = np.abs(np.asarray(erreurs_a, float)) - np.abs(np.asarray(erreurs_b, float))
-    n = len(d)
-    if n < 2 * pas + 1:
-        return np.nan, np.nan
-    d_centre = d - d.mean()
-    gamma = [np.dot(d_centre[k:], d_centre[: n - k]) / n for k in range(pas)]
-    variance = gamma[0] + 2 * sum(gamma[1:])
-    if variance <= 0:
-        variance = gamma[0]
-    if variance <= 0:
-        return np.nan, np.nan
-    stat = d.mean() / np.sqrt(variance / n)
-    correction = np.sqrt((n + 1 - 2 * pas + pas * (pas - 1) / n) / n)
-    stat *= correction
-    p_valeur = 2 * stats.t.sf(abs(stat), df=n - 1)
-    return float(stat), float(p_valeur)
+def mae_moyenne(metriques, serie, periode=config.PERIODE_SELECTION):
+    """MAE moyenne sur les horizons, par modèle, pour une série et une période."""
+    choisies = (metriques["serie"] == serie) & (metriques["periode"] == periode)
+    return metriques.loc[choisies].groupby("modele")["mae"].mean()
 
 
-def choisir_modele_final(metriques, tests_dm, serie, periode=config.PERIODE_SELECTION):
+def choisir_modele_final(metriques, serie, periode=config.PERIODE_SELECTION):
     """Applique la règle de sélection du protocole à une série, sur une seule période.
 
-    Modèle final : plus faible MAE moyenne sur les horizons, à condition de
-    battre le naïf (Diebold-Mariano, 5 %), calculée sur la période de validation
-    (config.PERIODE_SELECTION) ; le test ne sert qu'à rapporter les performances.
-    Interprétation retenue :
-    - les candidats sont classés par MAE moyenne croissante ;
-    - un candidat est retenu si sa MAE moyenne est inférieure à celle du naïf et
-      si le test DM contre le naïf le désigne meilleur sur au moins un horizon ;
-    - si aucun candidat ne remplit ces conditions, le modèle final est le naïf.
-    Retourne None si les métriques de la série ou du naïf sont absentes pour cette période.
+    Modèle final : plus faible MAE moyenne sur les horizons, calculée sur la
+    période de validation (config.PERIODE_SELECTION) uniquement ; le test ne
+    sert qu'à rapporter les performances. Le naïf est retenu s'il est le
+    meilleur ; en cas d'égalité, le naïf est préféré, puis l'ordre de config.MODELES.
+    Retourne None si aucune métrique n'est disponible pour cette série et cette période.
     """
-    reference = config.MODELE_REFERENCE
-    choisies = (metriques["serie"] == serie) & (metriques["periode"] == periode)
-    mae_moyenne = metriques.loc[choisies].groupby("modele")["mae"].mean()
-    if reference not in mae_moyenne:
+    moyennes = mae_moyenne(metriques, serie, periode)
+    if moyennes.empty:
         return None
-    tests = tests_dm.loc[(tests_dm["serie"] == serie) & (tests_dm["periode"] == periode)]
-    for modele in mae_moyenne.sort_values().index:
-        if modele == reference or mae_moyenne[modele] >= mae_moyenne[reference]:
-            continue
-        contre_naif = tests[
-            ((tests["modele_a"] == modele) & (tests["modele_b"] == reference))
-            | ((tests["modele_a"] == reference) & (tests["modele_b"] == modele))
-        ]
-        if (contre_naif["meilleur"] == modele).any():
-            return modele
-    return reference
-
-
-def calculer_tests_dm(previsions, modeles=config.MODELES):
-    """Compare chaque paire de modèles, par série, période et horizon (format de tests_dm.csv).
-
-    Dans une période et un horizon donnés, chaque date d'origine correspond à une
-    seule date cible : les erreurs des deux modèles sont alignées sur date_origine.
-    """
-    _exiger_periode(previsions)
-    p = previsions.dropna(subset=["reel"]).copy()
-    p["erreur"] = p["reel"] - p["prevision"]
-    lignes = []
-    for (serie, periode, horizon), g in p.groupby(["serie", "periode", "horizon"]):
-        erreurs = g.pivot(index="date_origine", columns="modele", values="erreur")
-        pas = config.PAS_PAR_HORIZON[horizon]
-        for modele_a, modele_b in combinations(modeles, 2):
-            if modele_a not in erreurs or modele_b not in erreurs:
-                continue
-            paire = erreurs[[modele_a, modele_b]].dropna()
-            stat, p_valeur = test_diebold_mariano(paire[modele_a], paire[modele_b], pas)
-            if np.isnan(p_valeur) or p_valeur >= config.SEUIL_DM:
-                meilleur = "aucun"
-            else:
-                meilleur = modele_a if stat < 0 else modele_b
-            lignes.append({
-                "serie": serie, "periode": periode, "horizon": horizon, "modele_a": modele_a,
-                "modele_b": modele_b, "stat_dm": stat, "p_valeur": p_valeur,
-                "meilleur": meilleur,
-            })
-    return pd.DataFrame(lignes, columns=config.COLONNES_TESTS_DM)
+    ordre = [config.MODELE_REFERENCE] + [m for m in config.MODELES if m != config.MODELE_REFERENCE]
+    rang = {modele: i for i, modele in enumerate(ordre)}
+    candidats = sorted(moyennes.index, key=lambda m: (moyennes[m], rang.get(m, len(ordre))))
+    return candidats[0]

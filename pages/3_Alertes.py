@@ -1,7 +1,8 @@
 """Page Alertes : prix observés hors de l'intervalle de niveau config.NIVEAU_ALERTE (95 %)
 de la prévision à l'horizon 1.
 
-- filtre de période : test (par défaut) ou validation (colonne periode de previsions.csv) ;
+- filtre de période : test global (par défaut, septembre 2020 à août 2026), test 1,
+  test 2, test 3 ou validation (colonne periode de previsions.csv) ;
 - graphique des prix observés sur la période choisie, avec l'intervalle d'alerte
   de la prévision à l'horizon 1 et les épisodes hors intervalle marqués ;
 - tableau des alertes (série, date, prix observé, borne dépassée, écart, sens),
@@ -27,15 +28,8 @@ st.title("Alertes")
 st.caption(f"Alerte : prix observé hors de l'intervalle à {NIVEAU} % de la prévision à l'horizon "
            f"{config.HORIZON_ALERTE} mois ({config.PAS_PAR_HORIZON[config.HORIZON_ALERTE]} mois "
            "après la dernière donnée connue à l'origine).")
-PERIODES = {
-    "test": f"Test ({ic.formater_mois(config.DATE_DEBUT_TEST)} à "
-            f"{ic.formater_mois(config.DATE_FIN_TEST)})",
-    "validation": f"Validation ({len(config.PERIODES_VALIDATION)} blocs, "
-                  f"{ic.formater_mois(config.PERIODES_VALIDATION[0][0])} à "
-                  f"{ic.formater_mois(config.PERIODES_VALIDATION[-1][1])})",
-}
-periode = st.radio("Période", list(PERIODES), format_func=PERIODES.get, horizontal=True,
-                   key="alertes_periode")
+PERIODES = {periode: ic.libelle_periode(periode) for periode in ic.PERIODES_AFFICHEES}
+periode = st.selectbox("Période", list(PERIODES), format_func=PERIODES.get, key="alertes_periode")
 if selection.modele is None:
     st.error("Aucun modèle disponible dans resultats/.")
     st.stop()
@@ -54,10 +48,11 @@ alertes = ic.calculer_alertes(previsions, modeles_par_serie, periode=periode)
 libelle = ic.libelle_serie(selection.serie)
 modele = modeles_par_serie.get(selection.serie)
 st.header(libelle)
-h1 = previsions[(previsions["serie"] == selection.serie) & (previsions["modele"] == modele)
-                & (previsions["periode"] == periode)
-                & (previsions["horizon"] == config.HORIZON_ALERTE)].sort_values("date_cible")
-s = series[(series["serie"] == selection.serie) & (series["date"] >= h1["date_cible"].min())]
+h1 = ic.filtrer_periode(previsions, periode)
+h1 = h1[(h1["serie"] == selection.serie) & (h1["modele"] == modele)
+        & (h1["horizon"] == config.HORIZON_ALERTE)].sort_values("date_cible")
+s = series[(series["serie"] == selection.serie)
+           & series["date"].between(h1["date_cible"].min(), h1["date_cible"].max())]
 alertes_serie = alertes[alertes["serie"] == selection.serie]
 
 figure = ic.graphique_serie(s, h1, niveau=NIVEAU, modele=modele, alertes=alertes_serie)

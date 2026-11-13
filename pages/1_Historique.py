@@ -1,10 +1,12 @@
 """Page Historique : évolution des prix observés par série.
 
-- courbe des prix depuis 1985, avec comparaison entre provinces ou entre toutes les séries,
-  périodes de validation et de test ombrées et valeur estimée marquée ;
-- décomposition STL (tendance, saisonnalité, résidu) de la série choisie ;
+- courbe des prix depuis 1985, avec comparaison entre les deux séries (maïs-grain en
+  Ontario et canola en Saskatchewan), périodes de validation et de test ombrées et
+  valeur estimée marquée (s'il y en a) ;
+- décomposition STL (tendance, saisonnalité, résidu) de la série choisie, avec la
+  série désaisonnalisée (observé − saisonnalité) ;
 - profil saisonnier moyen (prix moyen par mois de l'année) ;
-- statistiques descriptives (série choisie ou toutes les séries), hors valeur estimée.
+- statistiques descriptives (série choisie ou les deux séries), hors valeur estimée.
 
 La décomposition STL est descriptive ; elle ne produit aucune prévision.
 """
@@ -32,17 +34,11 @@ st.caption(f"{libelle} – {ic.formater_mois(s['date'].min())} à {ic.formater_m
 st.header("Évolution des prix")
 COMPARAISONS = {
     "aucune": "Série choisie seulement",
-    "provinces": f"Entre provinces ({config.LIBELLES_PRODUITS[selection.produit]})",
-    "toutes": "Toutes les séries",
+    "deux": "Les deux séries (" + " et ".join(ic.libelle_serie(s) for s in config.LISTE_SERIES) + ")",
 }
-comparaison = st.radio("Comparer", list(COMPARAISONS), format_func=COMPARAISONS.get,
+comparaison = st.radio("Afficher", list(COMPARAISONS), format_func=COMPARAISONS.get,
                        horizontal=True, key="historique_comparaison")
-if comparaison == "provinces":
-    liste = [f"{selection.produit}_{p}" for p in config.PROVINCES_PAR_PRODUIT[selection.produit]]
-elif comparaison == "toutes":
-    liste = list(config.LISTE_SERIES)
-else:
-    liste = [selection.serie]
+liste = list(config.LISTE_SERIES) if comparaison == "deux" else [selection.serie]
 liste = [serie for serie in liste if serie in set(series["serie"])]
 
 figure = ic.graphique_comparaison(series, liste)
@@ -51,9 +47,10 @@ ic.ajouter_valeurs_estimees(figure, series, liste)
 ic.afficher_graphique(figure)
 validations = " ; ".join(f"{ic.formater_mois(d)} à {ic.formater_mois(f)}"
                          for d, f in config.PERIODES_VALIDATION)
+tests = " ; ".join(ic.libelle_periode(periode) for periode in config.PERIODES_TEST)
 st.caption(f"Bandes grises : {len(config.PERIODES_VALIDATION)} blocs de validation de 12 mois "
-           f"({validations}). Bande orange : test final, de "
-           f"{ic.formater_mois(config.DATE_DEBUT_TEST)} à {ic.formater_mois(config.DATE_FIN_TEST)}.")
+           f"({validations}). Bandes orange : {len(config.PERIODES_TEST)} périodes de test de "
+           f"24 mois ({tests}).")
 if series.loc[series["serie"].isin(liste), "prix_impute"].any():
     estimes = series[series["serie"].isin(liste) & series["prix_impute"]]
     st.caption("Losange : valeur estimée par interpolation linéaire (absente de la source) – "
@@ -72,7 +69,9 @@ def decomposer(dates, prix):
     serie = pd.Series(prix, index=pd.DatetimeIndex(dates, freq="MS"))
     resultat = STL(serie, period=12, robust=True).fit()
     return pd.DataFrame({
-        "date": serie.index, "observe": serie.to_numpy(), "tendance": resultat.trend.to_numpy(),
+        "date": serie.index, "observe": serie.to_numpy(),
+        "desaisonnalise": (serie - resultat.seasonal).to_numpy(),
+        "tendance": resultat.trend.to_numpy(),
         "saisonnier": resultat.seasonal.to_numpy(), "residu": resultat.resid.to_numpy(),
     })
 
@@ -80,7 +79,8 @@ def decomposer(dates, prix):
 decomposition = decomposer(s["date"].to_numpy(), s["prix"].to_numpy())
 ic.afficher_graphique(ic.graphique_decomposition(decomposition))
 st.caption("STL robuste, période de 12 mois, appliquée aux prix en dollars : "
-           "observé = tendance + saisonnalité + résidu.")
+           "observé = tendance + saisonnalité + résidu. Série désaisonnalisée = observé − "
+           "saisonnalité (= tendance + résidu), en tirets dans le premier panneau.")
 
 # ---------------------------------------------------------------------------
 # Profil saisonnier
@@ -119,7 +119,7 @@ st.caption(f"Moyenne par mois de l'année, {debut} à {fin} "
 # Statistiques descriptives
 # ---------------------------------------------------------------------------
 st.header("Statistiques descriptives")
-PORTEES = {"serie": f"Série choisie ({libelle})", "toutes": "Toutes les séries"}
+PORTEES = {"serie": f"Série choisie ({libelle})", "toutes": "Les deux séries"}
 portee = st.radio("Séries", list(PORTEES), format_func=PORTEES.get, horizontal=True,
                   key="historique_statistiques")
 liste_statistiques = [selection.serie] if portee == "serie" else config.LISTE_SERIES
