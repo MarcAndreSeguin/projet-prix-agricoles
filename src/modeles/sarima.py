@@ -31,7 +31,7 @@ La fonction ne reçoit que l'historique jusqu'à l'origine et ne lit aucun
 fichier. Le modèle est réestimé à chaque appel, donc à chaque origine.
 
 Essai rapide (depuis la racine du dépôt) :
-    python -m src.modeles.sarima --serie mais_QC --blocs 1
+    python -m src.modeles.sarima --serie mais_ON --blocs 1
 
 Le choix de l'ordre final et l'interprétation des résultats reviennent à
 l'équipe : ce fichier ne fait que calculer les erreurs de validation.
@@ -48,39 +48,9 @@ from src import config
 from src.chargement import charger_series
 from src.evaluation import generer_paires_origine_cible, numero_periode_validation
 
-# ---------------------------------------------------------------------------
-# Colonnes et vérifications : copiées du naïf de Sabra (src/modeles/naif.py,
-# branche sabra-modele-naif) pour que ce fichier fonctionne sans sa branche.
-# Quand son naïf sera dans main, on pourra les importer depuis src.modeles.naif.
-# ---------------------------------------------------------------------------
-COLONNES = ["pas", "prevision"] + [
-    f"{borne}{int(round(niveau * 100))}"
-    for niveau in config.NIVEAUX_INTERVALLE
-    for borne in ("inf", "sup")
-]
-
-
-def verifier_historique(historique):
-    """Vérifie que l'historique est une pd.Series mensuelle complète ; la retourne en float."""
-    if not isinstance(historique, pd.Series) or not isinstance(historique.index, pd.DatetimeIndex):
-        raise TypeError("historique doit être une pd.Series indexée par un DatetimeIndex")
-    if len(historique) < 3:
-        raise ValueError(f"historique trop court : {len(historique)} valeur(s), au moins 3 requises")
-    if historique.isna().any():
-        raise ValueError("historique contient des valeurs manquantes")
-    attendues = pd.date_range(historique.index[0], periods=len(historique), freq="MS")
-    if not historique.index.equals(attendues):
-        raise ValueError("l'index de historique doit être mensuel (premier du mois), "
-                         "croissant, sans trou ni doublon")
-    return historique.astype(float)
-
-
-def verifier_pas(pas):
-    """Vérifie que pas est une liste non vide d'entiers ≥ 1 et la retourne."""
-    pas = list(pas)
-    if not pas or any(int(k) != k or k < 1 for k in pas):
-        raise ValueError(f"pas doit être une liste non vide d'entiers ≥ 1 (reçu : {pas})")
-    return [int(k) for k in pas]
+# Mêmes colonnes et mêmes vérifications que le naïf de Sabra (maintenant dans main)
+from src.modeles import naif
+from src.modeles.naif import COLONNES, verifier_historique, verifier_pas
 
 # ---------------------------------------------------------------------------
 # Ordres candidats : ((p, d, q), (P, D, Q, 12))
@@ -97,9 +67,11 @@ ORDRES_CANDIDATS = {
     "SARIMA(0,1,1)(0,1,1)12": ((0, 1, 1), (0, 1, 1, 12)),  # modèle « airline »
 }
 
-# Ordre utilisé par défaut par prevoir(). PROVISOIRE : à remplacer par l'ordre
-# retenu par Marc après la comparaison en validation (peut différer par série).
-ORDRE_RETENU = ORDRES_CANDIDATS["ARIMA(1,1,0)"]
+# Ordre utilisé par prevoir(), donc par scripts/executer_evaluation.py.
+# CONFIRMÉ par la validation : c'est l'ordre qui donne le plus petit MAE moyen sur les blocs de 
+# # validation. L'interface commune ne reçoit pas le nom de la série : c'est donc
+# un seul ordre pour les deux séries (mais_ON et canola_SK).
+ORDRE_RETENU = ORDRES_CANDIDATS["SARIMA(0,1,1)(0,1,1)12"]
 
 
 def ajuster(historique, ordre=ORDRE_RETENU):
@@ -143,24 +115,31 @@ def prevoir(historique, pas, ordre=ORDRE_RETENU):
 
 
 def comparer_ordres_en_validation(prix, ordres=ORDRES_CANDIDATS, nb_blocs=None):
-    """MAE de validation (en $/t) de chaque ordre candidat, par bloc et par horizon.
+    """MAE de validation (en $/t) de chaque ordre candidat et du naïf, par bloc et par horizon.
 
     prix : pd.Series de prix en dollars, index mensuel (toute la série).
     nb_blocs : limite aux nb_blocs derniers blocs de validation (essai rapide) ;
         None = les six blocs de config.PERIODES_VALIDATION.
     Retourne un DataFrame : ordre, bloc, horizon, mae, n.
+    Le naïf de Sabra est ajouté comme ligne de référence (« Naïf (référence) »).
     """
+    # Une fonction de prévision par ligne du tableau : les ordres candidats,
+    # puis le naïf. ordre=ordre fige l'ordre de chaque ligne dans la boucle.
+    fonctions = {nom: (lambda h, p, ordre=ordre: prevoir(h, p, ordre))
+                 for nom, ordre in ordres.items()}
+    fonctions["Naïf (référence)"] = naif.prevoir
+
     log_prix = np.log(prix)
     blocs = config.PERIODES_VALIDATION[-nb_blocs:] if nb_blocs else config.PERIODES_VALIDATION
     lignes = []
-    for nom, ordre in ordres.items():
+    for nom, fonction in fonctions.items():
         for debut, fin in blocs:
             paires = generer_paires_origine_cible(debut, fin)
             erreurs = []
             # Origine glissante : une estimation par origine, sur les données
             # jusqu'à l'origine incluse seulement.
             for origine, groupe in paires.groupby("date_origine"):
-                p = prevoir(log_prix.loc[:origine], groupe["pas"], ordre)
+                p = fonction(log_prix.loc[:origine], groupe["pas"])
                 prevision_dollars = np.exp(p["prevision"].to_numpy())  # retour en $
                 reel = prix.loc[groupe["date_cible"]].to_numpy()
                 erreurs.append(pd.DataFrame({
@@ -178,24 +157,32 @@ def comparer_ordres_en_validation(prix, ordres=ORDRES_CANDIDATS, nb_blocs=None):
 def principal():
     """Essai en ligne de commande : compare les ordres candidats sur une série."""
     parseur = argparse.ArgumentParser(description="Essai du modèle SARIMA")
-    parseur.add_argument("--serie", default="mais_QC", choices=config.LISTE_SERIES)
-    parseur.add_argument("--blocs", type=int, default=1,
+    parseur.add_argument("--serie", default=config.LISTE_SERIES[0], choices=config.LISTE_SERIES)
+    parseur.add_argument("--blocs", type=int, default=6,
                          help="nombre de blocs de validation (1 à 6) ; 1 = essai rapide")
+    parseur.add_argument("--csv", help="fichier où enregistrer le tableau détaillé (facultatif)")
     args = parseur.parse_args()
 
     series = charger_series()
     prix = series.loc[series["serie"] == args.serie].set_index("date")["prix"].asfreq("MS")
 
-    # 1) Un ajustement simple sur l'entraînement, pour voir les coefficients.
+    # 1) Coefficients de chaque ordre candidat, estimés sur tout l'entraînement
+    #    (avant le premier bloc de validation).
     fin_entrainement = pd.Timestamp(config.PERIODES_VALIDATION[0][0]) - pd.DateOffset(months=1)
     y = np.log(prix.loc[:fin_entrainement])
-    print(ajuster(y).summary().tables[1])
-    print(prevoir(y, list(config.PAS_PAR_HORIZON.values())).round(4))
+    for nom, ordre in ORDRES_CANDIDATS.items():
+        print(f"\n--- {nom}, {args.serie}, estimé sur {y.index[0]:%Y-%m} à {fin_entrainement:%Y-%m} ---")
+        print(ajuster(y, ordre).summary().tables[1])
 
-    # 2) Comparaison des ordres candidats en validation.
+    # 2) Comparaison des ordres candidats (et du naïf) en validation.
     tableau = comparer_ordres_en_validation(prix, nb_blocs=args.blocs)
-    print(f"\nMAE de validation ($/t), {args.serie}, {args.blocs} bloc(s) :")
+    print(f"\nMAE de validation ($/t), {args.serie}, moyenne sur {args.blocs} bloc(s) :")
     print(tableau.pivot_table(index="ordre", columns="horizon", values="mae").round(2))
+    print(f"\nMAE de validation ($/t), {args.serie}, par bloc (moyenne des 3 horizons) :")
+    print(tableau.pivot_table(index="ordre", columns="bloc", values="mae").round(2))
+    if args.csv:
+        tableau.assign(serie=args.serie).to_csv(args.csv, index=False)
+        print(f"\nTableau détaillé enregistré : {args.csv}")
 
 
 if __name__ == "__main__":
