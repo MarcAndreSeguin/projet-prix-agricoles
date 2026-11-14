@@ -2,9 +2,10 @@
 des limites de l'outil.
 
 Le contenu descriptif reprend docs/protocole.md et notebooks/01_pretraitement.ipynb
-(contrôles, valeur estimée et statistiques recalculés à partir de data/series.csv) ;
-les sections « Limites » et
-« Recommandations » sont rédigées par l'équipe.
+(contrôles, valeurs estimées et statistiques recalculés à partir de data/series.csv) :
+séries et choix des provinces, découpage chronologique, métriques et leurs formules,
+règle du modèle final. Les sections « Limites » et « Recommandations » sont rédigées
+par l'équipe.
 """
 
 import pandas as pd
@@ -50,10 +51,13 @@ definitions = pd.DataFrame({
     "Géographie": [config.SERIES[s]["province"] for s in config.LISTE_SERIES],
 })
 st.dataframe(definitions, hide_index=True, use_container_width=True)
+st.subheader("Choix des provinces")
 st.markdown(
-    "Le canola n'est retenu que pour la Saskatchewan et l'Alberta, ce qui permet une période "
-    "commune aux quatre séries à partir de janvier 1985 (au Québec, la série du canola ne "
-    "commence qu'en 2000)."
+    "Une seule série est suivie par produit : le maïs-grain en Ontario et le canola en "
+    "Saskatchewan. Ce sont les principales provinces productrices de ces cultures, et les "
+    "provinces voisines (Québec pour le maïs-grain, Alberta pour le canola) ont des marchés "
+    "pratiquement jumeaux. Les deux séries retenues couvrent la même période, à partir "
+    f"de {ic.formater_mois(config.DATE_DEBUT)}."
 )
 
 # ---------------------------------------------------------------------------
@@ -63,10 +67,10 @@ st.header("Prétraitement")
 st.markdown("""
 Le prétraitement de référence est le notebook **notebooks/01_pretraitement.ipynb**. Il lit les
 fichiers sources **data/mais.csv** et **data/canola.csv** (extraits du tableau de Statistique
-Canada, encodage cp1252, dates au format mois/jour/année), contrôle les quatre séries, calcule
-les statistiques descriptives et estime la valeur manquante. Le script
-**scripts/preparer_donnees.py** reproduit ces traitements et écrit **data/series.csv**, seul
-fichier de données lu par l'application.
+Canada, encodage cp1252, dates au format mois/jour/année), contrôle les séries et calcule
+les statistiques descriptives. Le script **scripts/preparer_donnees.py** reproduit ces
+traitements pour les deux séries retenues et écrit **data/series.csv**, seul fichier de
+données lu par l'application.
 """)
 
 
@@ -124,17 +128,22 @@ else:
 """)
     st.dataframe(controler(series), hide_index=True, use_container_width=True)
 
-    st.subheader("Valeur manquante estimée")
+    st.subheader("Valeurs manquantes")
     estimations = detailler_estimations(series)
     if estimations.empty:
-        st.markdown("Aucune valeur estimée dans data/series.csv.")
+        st.markdown(
+            "Aucune valeur estimée : les deux séries retenues sont complètes dans les fichiers "
+            "sources. La seule valeur manquante des sources (canola en Alberta, mai 2012) "
+            "appartient à une série non retenue. La colonne **prix_impute** de data/series.csv "
+            "est conservée (toutes ses valeurs valent False)."
+        )
     else:
         premiere_validation = ic.formater_mois(config.PERIODES_VALIDATION[0][0])
         st.markdown(f"""
 Le prix absent de la source est remplacé par la moyenne des prix des deux mois voisins, ce qui
 correspond à une interpolation linéaire pour un seul mois manquant. La valeur est signalée dans la
-colonne **prix_impute** de data/series.csv. L'estimation est faite avant le découpage chronologique ;
-les mois voisins précèdent la première période de validation ({premiere_validation}).
+colonne **prix_impute** de data/series.csv. L'estimation est faite avant le découpage chronologique
+(première période de validation : {premiere_validation}).
 """)
         st.dataframe(estimations, hide_index=True, use_container_width=True)
 
@@ -151,8 +160,6 @@ les mois voisins précèdent la première période de validation ({premiere_vali
 st.header("Protocole d'évaluation")
 horizons = ", ".join(f"{config.LIBELLES_HORIZONS[h]} ({p} mois après la dernière donnée)"
                      for h, p in config.PAS_PAR_HORIZON.items())
-validations = " ; ".join(f"{ic.formater_mois(d)} à {ic.formater_mois(f)}"
-                         for d, f in config.PERIODES_VALIDATION)
 st.markdown(f"""
 **Modèles comparés**
 - {config.LIBELLES_MODELES['naif']} : la prévision est le dernier prix observé.
@@ -164,31 +171,103 @@ les prévisions sont affichées en dollars.
 
 **Horizons** : compte tenu du délai de publication, les horizons de consultation sont
 {horizons}.
+""")
 
-**Découpage chronologique** (commun aux quatre séries et aux trois méthodes) : entraînement à
-partir de {ic.formater_mois(config.DATE_DEBUT_ENTRAINEMENT)} ; {len(config.PERIODES_VALIDATION)} périodes de validation de
-12 mois ({validations}), chacune précédée de toutes les données antérieures ; test final de
-{ic.formater_mois(config.DATE_DEBUT_TEST)} à {ic.formater_mois(config.DATE_FIN_TEST)}, réservé et
-non utilisé pour choisir les modèles. Les prévisions sont produites avec les seules données
-connues à leur date d'origine, puis comparées aux prix observés.
+# ---------------------------------------------------------------------------
+# Découpage chronologique
+# ---------------------------------------------------------------------------
+st.subheader("Découpage chronologique")
+st.markdown(f"""
+Le découpage est commun aux deux séries et aux trois méthodes. Les périodes de validation et de
+test sont définies par leurs mois **cibles** : chaque mois cible est prévu à chaque horizon depuis
+l'origine située {", ".join(str(p) for p in config.PAS_PAR_HORIZON.values())} mois plus tôt
+(origine glissante), avec un modèle réestimé à chaque origine sur toutes les données disponibles
+depuis {ic.formater_mois(config.DATE_DEBUT_ENTRAINEMENT)} (fenêtre croissante). Les origines
+peuvent précéder une période, mais aucune cible n'en sort : chaque prévision appartient à une
+seule période.
+""")
 
-**Métriques**, par horizon :
-- MAE (erreur absolue moyenne, en dollars) ;
-- RMSE (racine de l'erreur quadratique moyenne, en dollars) ;
-- MAPE (erreur absolue moyenne en pourcentage) ;
-- taux de couverture des intervalles à 80 % et à 95 % (proportion des prix observés situés
-  dans l'intervalle).
 
-**Test de Diebold-Mariano** : comparaison des erreurs de deux modèles sur les mêmes origines
-(perte absolue, variance de long terme avec h − 1 retards où h est le nombre de pas,
-correction de Harvey, Leybourne et Newbold, seuil de 5 %).
+def nb_mois(debut, fin):
+    return len(pd.date_range(debut, fin, freq="MS"))
 
+
+lignes_decoupage = [{
+    "Période": "Entraînement",
+    "Mois cibles": f"depuis {ic.formater_mois(config.DATE_DEBUT_ENTRAINEMENT)}, jusqu'à chaque origine",
+    "Nombre de mois": "fenêtre croissante",
+    "Rôle": "Estimation des modèles",
+}]
+for numero, (debut, fin) in enumerate(config.PERIODES_VALIDATION, start=1):
+    lignes_decoupage.append({
+        "Période": f"Validation, bloc {numero}",
+        "Mois cibles": f"{ic.formater_mois(debut)} à {ic.formater_mois(fin)}",
+        "Nombre de mois": str(nb_mois(debut, fin)),
+        "Rôle": "Choix du modèle final",
+    })
+for periode, (debut, fin) in config.PERIODES_TEST.items():
+    lignes_decoupage.append({
+        "Période": ic.libelle_periode(periode, avec_dates=False),
+        "Mois cibles": f"{ic.formater_mois(debut)} à {ic.formater_mois(fin)}",
+        "Nombre de mois": str(nb_mois(debut, fin)),
+        "Rôle": "Performances rapportées",
+    })
+lignes_decoupage.append({
+    "Période": ic.libelle_periode(config.PERIODE_TEST_GLOBAL, avec_dates=False),
+    "Mois cibles": f"{ic.formater_mois(config.DATE_DEBUT_TEST)} à {ic.formater_mois(config.DATE_FIN_TEST)}",
+    "Nombre de mois": str(nb_mois(config.DATE_DEBUT_TEST, config.DATE_FIN_TEST)),
+    "Rôle": "Bilan sur l'ensemble des trois tests",
+})
+st.dataframe(pd.DataFrame(lignes_decoupage), hide_index=True, use_container_width=True)
+st.caption(f"Nombre de prévisions évaluées par série, modèle et horizon : "
+           f"{nb_mois(config.DATE_DEBUT_VALIDATION, config.DATE_FIN_VALIDATION)} en validation, "
+           f"{nb_mois(*config.PERIODES_TEST['test_1'])} par période de test, "
+           f"{nb_mois(config.DATE_DEBUT_TEST, config.DATE_FIN_TEST)} pour le test global. "
+           "Le test n'est jamais utilisé pour choisir les modèles.")
+
+# ---------------------------------------------------------------------------
+# Métriques
+# ---------------------------------------------------------------------------
+st.subheader("Métriques")
+st.markdown(
+    "Les métriques sont calculées pour chaque série, chaque modèle, chaque horizon et chaque "
+    "période (validation, test 1, test 2, test 3 et test global), sans jamais mélanger validation "
+    "et test. Pour une période et un horizon, $y_t$ est le prix observé au mois cible $t$, "
+    "$\\hat{y}_t$ la prévision (en dollars), $[L_t^{(c)}, U_t^{(c)}]$ l'intervalle de prévision "
+    "de niveau $c$ et $n$ le nombre de mois cibles."
+)
+st.markdown("**MAE** (erreur absolue moyenne, en dollars par tonne)")
+st.latex(r"\mathrm{MAE} = \frac{1}{n} \sum_{t=1}^{n} \left| y_t - \hat{y}_t \right|")
+st.markdown("**RMSE** (racine de l'erreur quadratique moyenne, en dollars par tonne)")
+st.latex(r"\mathrm{RMSE} = \sqrt{\frac{1}{n} \sum_{t=1}^{n} \left( y_t - \hat{y}_t \right)^2}")
+st.markdown("**MAPE** (erreur absolue moyenne en pourcentage)")
+st.latex(r"\mathrm{MAPE} = \frac{100}{n} \sum_{t=1}^{n} \frac{\left| y_t - \hat{y}_t \right|}{\left| y_t \right|}")
+st.markdown("**Couverture** de l'intervalle de niveau $c$ (80 % ou 95 %) : proportion des prix "
+            "observés situés dans l'intervalle, à comparer au niveau visé $c$")
+st.latex(r"\mathrm{Couverture}_c = \frac{1}{n} \sum_{t=1}^{n} \mathbf{1}\left\{ L_t^{(c)} \le y_t \le U_t^{(c)} \right\}")
+
+# ---------------------------------------------------------------------------
+# Modèle final et autres règles
+# ---------------------------------------------------------------------------
+st.subheader("Choix du modèle final")
+st.markdown("""
+Pour chaque série, le modèle final est celui qui a la plus faible MAE moyenne sur les trois
+horizons, calculée sur la **période de validation uniquement** :
+""")
+st.latex(r"\text{modèle final} = \arg\min_{m} \; \frac{1}{3} \sum_{h \in \{1, 3, 6\}} \mathrm{MAE}_{m,h}^{\text{validation}}")
+st.markdown("""
+Le modèle naïf est retenu s'il est le meilleur (en cas d'égalité, le naïf est préféré). Les
+métriques des trois méthodes sont ensuite présentées pour chaque période de test et pour le test
+global ; elles ne modifient pas le choix du modèle final.
+""")
+
+st.subheader("Autres règles")
+st.markdown(f"""
 **Intervalles** : 80 % pour l'affichage, 95 % pour les alertes.
 
-**Choix du modèle final**, pour chaque série : plus faible MAE moyenne sur les 3 horizons, à
-condition de battre le modèle naïf. Un modèle est retenu si sa MAE moyenne est inférieure à
-celle du naïf et si le test de Diebold-Mariano le désigne meilleur que le naïf (5 %) sur au
-moins un horizon ; sinon, le modèle naïf est retenu.
+**Prévision en dollars** : les modèles prévoient le logarithme du prix ; l'exponentielle de la
+prévision correspond à la médiane du prix prévu (et non à sa moyenne). Les bornes des
+intervalles restent des quantiles du prix.
 
 **Alerte** : prix observé hors de l'intervalle à 95 % de la prévision à l'horizon
 {config.LIBELLES_HORIZONS[config.HORIZON_ALERTE]}.

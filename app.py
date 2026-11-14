@@ -1,6 +1,6 @@
 """Page d'accueil de l'application Streamlit (point d'entrée : streamlit run app.py).
 
-Tableau de bord : date de la dernière donnée, cartes des 4 séries (dernier prix,
+Tableau de bord : date de la dernière donnée, cartes des 2 séries (dernier prix,
 variations sur 1 et 12 mois, indicateur d'alerte) et résumé chiffré des alertes.
 """
 
@@ -15,8 +15,8 @@ series = ic.exiger_series()
 ic.panneau_lateral()
 
 st.title("Suivi et prévision des prix agricoles")
-st.caption(f"Maïs-grain (Québec, Ontario) et canola (Saskatchewan, Alberta) – Statistique Canada, "
-           f"tableau {config.TABLEAU_STATCAN} ({config.UNITE_PRIX})")
+st.caption(" et ".join(ic.libelle_serie(s) for s in config.LISTE_SERIES)
+           + f" – Statistique Canada, tableau {config.TABLEAU_STATCAN} ({config.UNITE_PRIX})")
 
 # ---------------------------------------------------------------------------
 # Dernière donnée disponible
@@ -53,37 +53,35 @@ def variation(prix, mois):
 
 
 # ---------------------------------------------------------------------------
-# Cartes : une ligne par produit, une colonne par province suivie
+# Cartes : une par série, côte à côte
 # ---------------------------------------------------------------------------
 st.markdown("## Situation par série")
-for produit, provinces in config.PROVINCES_PAR_PRODUIT.items():
-    st.markdown(f"### {config.LIBELLES_PRODUITS[produit]}")
-    colonnes = st.columns(len(provinces))
-    for colonne, province in zip(colonnes, provinces):
-        serie = f"{produit}_{province}"
-        prix = series.loc[series["serie"] == serie].set_index("date")["prix"]
-        with colonne.container(border=True):
-            st.markdown(f"**{config.LIBELLES_PROVINCES[province]}**")
-            if prix.empty:
-                st.caption("Aucune donnée.")
-                continue
-            derniere = prix.index.max()
-            var_1 = variation(prix, 1)
-            st.metric(
-                label=f"Dernier prix ({ic.formater_mois(derniere)})",
-                value=ic.formater_prix(prix[derniere]),
-                delta=f"{ic.formater_pct(var_1)} sur 1 mois" if pd.notna(var_1) else None,
-                delta_color="off",
-            )
-            st.caption(f"Sur 12 mois : {ic.formater_pct(variation(prix, 12))}")
+colonnes = st.columns(len(config.LISTE_SERIES))
+for colonne, serie in zip(colonnes, config.LISTE_SERIES):
+    prix = series.loc[series["serie"] == serie].set_index("date")["prix"]
+    with colonne.container(border=True):
+        st.markdown(f"### {config.LIBELLES_PRODUITS[config.PRODUIT_PAR_SERIE[serie]]}")
+        st.caption(config.LIBELLES_PROVINCES[config.PROVINCE_PAR_SERIE[serie]])
+        if prix.empty:
+            st.caption("Aucune donnée.")
+            continue
+        derniere = prix.index.max()
+        var_1 = variation(prix, 1)
+        st.metric(
+            label=f"Dernier prix ({ic.formater_mois(derniere)})",
+            value=ic.formater_prix(prix[derniere]),
+            delta=f"{ic.formater_pct(var_1)} sur 1 mois" if pd.notna(var_1) else None,
+            delta_color="off",
+        )
+        st.caption(f"Sur 12 mois : {ic.formater_pct(variation(prix, 12))}")
 
-            if en_cours is None:
-                st.markdown("Alerte : indisponible (aucun résultat)")
-            elif serie in set(en_cours["serie"]):
-                sens = en_cours.loc[en_cours["serie"] == serie, "sens"].iloc[0]
-                st.markdown(f":red[**⚠ Alerte** : prix {sens} de l'intervalle à 95 %]")
-            else:
-                st.markdown("✓ Aucune alerte")
+        if en_cours is None:
+            st.markdown("Alerte : indisponible (aucun résultat)")
+        elif serie in set(en_cours["serie"]):
+            sens = en_cours.loc[en_cours["serie"] == serie, "sens"].iloc[0]
+            st.markdown(f":red[**⚠ Alerte** : prix {sens} de l'intervalle à {ic.NIVEAU_ALERTE_PCT} %]")
+        else:
+            st.markdown("✓ Aucune alerte")
 
 # ---------------------------------------------------------------------------
 # Résumé chiffré des alertes
@@ -93,7 +91,7 @@ if alertes is None:
     st.caption("Aucun résultat de prévision disponible dans resultats/.")
 else:
     st.caption(
-        f"Prix observé hors de l'intervalle à 95 % de la prévision à l'horizon "
+        f"Prix observé hors de l'intervalle à {ic.NIVEAU_ALERTE_PCT} % de la prévision à l'horizon "
         f"{config.HORIZON_ALERTE} mois, selon le modèle final de chaque série."
     )
     debut_12_mois = derniere_date - pd.DateOffset(months=11)
@@ -102,7 +100,7 @@ else:
               f"{en_cours['serie'].nunique()} sur {len(config.LISTE_SERIES)}")
     c2.metric("Alertes sur les 12 derniers mois",
               int((alertes["date_cible"] >= debut_12_mois).sum()))
-    c3.metric("Alertes depuis le début du test", len(alertes))
+    c3.metric(f"Alertes depuis {ic.formater_mois(config.DATE_DEBUT_TEST)} (test global)", len(alertes))
 
     if not en_cours.empty:
         tableau = pd.DataFrame({
@@ -110,8 +108,9 @@ else:
             "Mois": en_cours["date_cible"].map(ic.formater_mois),
             "Modèle": en_cours["modele"].map(ic.libelle_modele),
             "Prix observé": en_cours["reel"].map(ic.formater_prix),
-            "Intervalle à 95 %": [f"{ic.formater_prix(a)} – {ic.formater_prix(b)}"
-                                  for a, b in zip(en_cours["inf95"], en_cours["sup95"])],
+            f"Intervalle à {ic.NIVEAU_ALERTE_PCT} %": [
+                f"{ic.formater_prix(a)} – {ic.formater_prix(b)}"
+                for a, b in zip(en_cours[ic.INF_ALERTE], en_cours[ic.SUP_ALERTE])],
             "Sens": en_cours["sens"],
             "Écart à la borne": en_cours["ecart_pct"].map(ic.formater_pct),
         })
