@@ -2,17 +2,21 @@
 
 Usage : python scripts/generer_resultats_factices.py [--forcer]
 
-Les prévisions sont fabriquées à partir des vraies séries de data/series.csv :
-dernier prix connu à l'origine, plus un écart aléatoire propre à chaque modèle
-(le modèle naïf n'a aucun écart). Les intervalles sont calculés en log, avec une
-largeur proportionnelle à l'écart-type des variations mensuelles avant
-config.DATE_DEBUT_TEST et à la racine du nombre de pas, puis ramenés en dollars.
-Quelques prévisions à l'horizon 1 sont décalées volontairement pour que le prix
-observé sorte de l'intervalle à 95 % et déclenche une alerte.
+Les prévisions sont fabriquées à partir des vraies séries de data/series.csv,
+sur les mêmes paires origine-cible que l'évaluation réelle (six blocs de
+validation et trois périodes de test, src/evaluation.py,
+generer_paires_evaluation()), avec la colonne periode (validation, test_1,
+test_2, test_3) : dernier prix connu à l'origine, plus un écart aléatoire propre
+à chaque modèle (le modèle naïf n'a aucun écart). Les intervalles sont calculés
+en log, avec une largeur proportionnelle à l'écart-type des variations
+mensuelles avant config.DATE_DEBUT_TEST et à la racine du nombre de pas, puis
+ramenés en dollars. Quelques prévisions de test à l'horizon 1 sont décalées
+volontairement pour que le prix observé sorte de l'intervalle à 95 % et
+déclenche une alerte.
 
-Fichiers produits : previsions.csv, previsions_futures.csv, metriques.csv,
-tests_dm.csv et le marqueur FACTICE.txt. Ces résultats n'ont aucune valeur
-d'analyse et ne doivent pas être utilisés dans le rapport.
+Fichiers produits : previsions.csv, previsions_futures.csv, metriques.csv (avec
+les lignes test_global) et le marqueur FACTICE.txt. Ces résultats n'ont aucune
+valeur d'analyse et ne doivent pas être utilisés dans le rapport.
 
 Par sécurité, le script refuse d'écraser des résultats existants si
 FACTICE.txt est absent (résultats réels), sauf avec --forcer.
@@ -29,8 +33,8 @@ from scipy import stats
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src import config  # noqa: E402
-from src.chargement import charger_series  # noqa: E402
-from src.evaluation import calculer_metriques, calculer_tests_dm  # noqa: E402
+from src.chargement import charger_series, verifier_colonnes  # noqa: E402
+from src.evaluation import calculer_metriques, generer_paires_evaluation  # noqa: E402
 
 GRAINE = 5103
 NB_HORS_INTERVALLE_PAR_SERIE = 3
@@ -60,33 +64,28 @@ def construire_ligne(serie, modele, origine, cible, horizon, log_prevision, sigm
     }
 
 
-def prevoir(rng, serie, origine, prix_origine, sigma_mensuel, avec_reel, prix_par_date):
-    """Prévisions factices des 4 modèles pour une origine, sur les 3 horizons."""
+def prevoir(rng, serie, origine, cible, horizon, pas, prix_origine, sigma_mensuel):
+    """Prévisions factices des 3 modèles pour une paire origine-cible."""
     lignes = []
-    for horizon, pas in config.PAS_PAR_HORIZON.items():
-        cible = origine + pd.DateOffset(months=pas)
-        if avec_reel and cible not in prix_par_date.index:
-            continue
-        for modele, (biais, ecart, facteur) in PARAMETRES.items():
-            log_prevision = np.log(prix_origine) + biais * pas + rng.normal(0, ecart * np.sqrt(pas))
-            sigma = facteur * sigma_mensuel * np.sqrt(pas)
-            ligne = construire_ligne(serie, modele, origine, cible, horizon, log_prevision, sigma)
-            ligne["sigma"] = sigma
-            if avec_reel:
-                ligne["reel"] = prix_par_date[cible]
-            lignes.append(ligne)
+    for modele, (biais, ecart, facteur) in PARAMETRES.items():
+        log_prevision = np.log(prix_origine) + biais * pas + rng.normal(0, ecart * np.sqrt(pas))
+        sigma = facteur * sigma_mensuel * np.sqrt(pas)
+        ligne = construire_ligne(serie, modele, origine, cible, horizon, log_prevision, sigma)
+        ligne["sigma"] = sigma
+        lignes.append(ligne)
     return lignes
 
 
 def forcer_hors_intervalle(rng, previsions):
-    """Décale quelques prévisions à l'horizon 1 pour que le réel sorte de l'IC 95 %.
+    """Décale quelques prévisions de test à l'horizon 1 pour que le réel sorte de l'IC 95 %.
 
-    Le décalage est appliqué aux 4 modèles pour la même série et la même date
+    Le décalage est appliqué aux 3 modèles pour la même série et la même date
     cible, afin que l'alerte apparaisse quel que soit le modèle retenu.
     Retourne les prévisions modifiées et la liste des (serie, date_cible) visées.
     """
     visees = []
-    h1 = previsions[previsions["horizon"] == config.HORIZON_ALERTE]
+    dans_test = previsions["periode"].isin(list(config.PERIODES_TEST))
+    h1 = previsions[(previsions["horizon"] == config.HORIZON_ALERTE) & dans_test]
     for serie, g in h1.groupby("serie"):
         cibles = g["date_cible"].drop_duplicates()
         choix = rng.choice(cibles.to_numpy(), size=min(NB_HORS_INTERVALLE_PAR_SERIE, len(cibles)),
@@ -94,7 +93,7 @@ def forcer_hors_intervalle(rng, previsions):
         for cible in choix:
             signe = rng.choice([-1, 1])
             masque = (previsions["serie"] == serie) & (previsions["date_cible"] == cible) \
-                & (previsions["horizon"] == config.HORIZON_ALERTE)
+                & (previsions["horizon"] == config.HORIZON_ALERTE) & dans_test
             for indice in previsions.index[masque]:
                 ligne = previsions.loc[indice]
                 log_prevision = np.log(ligne["reel"]) - signe * 1.5 * Z95 * ligne["sigma"]
@@ -113,55 +112,69 @@ def mettre_en_forme(previsions, colonnes):
         sortie[colonne] = pd.to_datetime(sortie[colonne]).dt.strftime("%Y-%m-01")
     colonnes_prix = [c for c in ["prevision", "inf80", "sup80", "inf95", "sup95", "reel"] if c in sortie]
     sortie[colonnes_prix] = sortie[colonnes_prix].round(2)
-    return sortie.sort_values(["serie", "modele", "date_origine", "horizon"]).reset_index(drop=True)
+    tri = [c for c in ["serie", "modele", "periode", "date_cible", "horizon"] if c in sortie]
+    return sortie.sort_values(tri).reset_index(drop=True)
 
 
 def generer(series, rng):
-    """Retourne (previsions, previsions_futures, metriques, tests_dm, visees)."""
+    """Retourne (previsions, previsions_futures, metriques, visees)."""
     lignes, lignes_futures = [], []
+    paires = generer_paires_evaluation()
     for serie, s in series.groupby("serie"):
         prix_par_date = s.set_index("date")["prix"]
         avant_test = prix_par_date[prix_par_date.index < config.DATE_DEBUT_TEST]
         sigma_mensuel = np.log(avant_test).diff().std()
 
-        origines = prix_par_date.index[prix_par_date.index >= config.DATE_DEBUT_TEST]
-        for origine in origines:
-            lignes += prevoir(rng, serie, origine, prix_par_date[origine], sigma_mensuel,
-                              True, prix_par_date)
+        for paire in paires.itertuples():
+            nouvelles = prevoir(rng, serie, paire.date_origine, paire.date_cible, paire.horizon,
+                                paire.pas, prix_par_date[paire.date_origine], sigma_mensuel)
+            for ligne in nouvelles:
+                ligne["periode"] = paire.periode
+                ligne["reel"] = prix_par_date[paire.date_cible]
+            lignes += nouvelles
 
         derniere = prix_par_date.index.max()
-        lignes_futures += prevoir(rng, serie, derniere, prix_par_date[derniere], sigma_mensuel,
-                                  False, prix_par_date)
+        for horizon, pas in config.PAS_PAR_HORIZON.items():
+            lignes_futures += prevoir(rng, serie, derniere, derniere + pd.DateOffset(months=pas),
+                                      horizon, pas, prix_par_date[derniere], sigma_mensuel)
 
     previsions = pd.DataFrame(lignes)
     previsions, visees = forcer_hors_intervalle(rng, previsions)
     previsions_futures = pd.DataFrame(lignes_futures)
 
     metriques = calculer_metriques(previsions)
-    tests_dm = calculer_tests_dm(previsions)
 
     previsions = mettre_en_forme(previsions, config.COLONNES_PREVISIONS)
     previsions_futures = mettre_en_forme(previsions_futures, config.COLONNES_PREVISIONS_FUTURES)
     metriques = metriques.round({"mae": 4, "rmse": 4, "mape": 4, "couverture80": 4, "couverture95": 4})
-    tests_dm = tests_dm.round({"stat_dm": 4, "p_valeur": 4})
-    return previsions, previsions_futures, metriques, tests_dm, visees
+    metriques = metriques.sort_values(["serie", "modele", "periode", "horizon"]).reset_index(drop=True)
+    return previsions, previsions_futures, metriques, visees
 
 
-def verifier_colonnes(fichiers):
-    """Relit chaque fichier et compare ses colonnes au contrat. Retourne True si tout concorde."""
-    attendu = {
-        config.FICHIER_PREVISIONS.name: config.COLONNES_PREVISIONS,
-        config.FICHIER_PREVISIONS_FUTURES.name: config.COLONNES_PREVISIONS_FUTURES,
-        config.FICHIER_METRIQUES.name: config.COLONNES_METRIQUES,
-        config.FICHIER_TESTS_DM.name: config.COLONNES_TESTS_DM,
-    }
+# Colonnes et valeurs de periode attendues pour chaque fichier produit
+CONTRAT = {
+    config.FICHIER_PREVISIONS.name: (config.COLONNES_PREVISIONS, config.PERIODES_PREVISIONS),
+    config.FICHIER_PREVISIONS_FUTURES.name: (config.COLONNES_PREVISIONS_FUTURES, None),
+    config.FICHIER_METRIQUES.name: (config.COLONNES_METRIQUES, config.PERIODES_METRIQUES),
+}
+
+
+def relire_et_verifier(fichiers):
+    """Relit chaque fichier et vérifie ses colonnes et ses périodes. Retourne True si tout concorde."""
     succes = True
-    print("\nVérification des colonnes (relecture des fichiers)")
+    print("\nVérification du contrat (relecture des fichiers)")
     for chemin in fichiers:
-        colonnes = list(pd.read_csv(chemin, nrows=0).columns)
-        concorde = colonnes == attendu[chemin.name]
+        tableau = pd.read_csv(chemin)
+        colonnes, periodes = CONTRAT[chemin.name]
+        try:
+            verifier_colonnes(tableau, colonnes, chemin.name, periodes)
+            concorde = True
+        except ValueError as erreur:
+            print(f"  {erreur}")
+            concorde = False
         succes &= concorde
-        print(f"  [{'OK' if concorde else 'ÉCHEC'}] {chemin.name} : {', '.join(colonnes)}")
+        valeurs = f" ; periode : {', '.join(pd.unique(tableau['periode']))}" if "periode" in tableau else ""
+        print(f"  [{'OK' if concorde else 'ÉCHEC'}] {chemin.name} : {', '.join(tableau.columns)}{valeurs}")
     return succes
 
 
@@ -174,17 +187,17 @@ def main():
     dossier = config.DOSSIER_RESULTATS
     marqueur = dossier / "FACTICE.txt"
     fichiers = [config.FICHIER_PREVISIONS, config.FICHIER_PREVISIONS_FUTURES,
-                config.FICHIER_METRIQUES, config.FICHIER_TESTS_DM]
+                config.FICHIER_METRIQUES]
     if any(f.exists() for f in fichiers) and not marqueur.exists() and not args.forcer:
         sys.exit("resultats/ contient des résultats sans FACTICE.txt (résultats réels ?). "
                  "Arrêt sans rien écrire ; utiliser --forcer pour les écraser.")
 
     series = charger_series()
     rng = np.random.default_rng(GRAINE)
-    previsions, previsions_futures, metriques, tests_dm, visees = generer(series, rng)
+    previsions, previsions_futures, metriques, visees = generer(series, rng)
 
     dossier.mkdir(parents=True, exist_ok=True)
-    for tableau, chemin in zip([previsions, previsions_futures, metriques, tests_dm], fichiers):
+    for tableau, chemin in zip([previsions, previsions_futures, metriques], fichiers):
         tableau.to_csv(chemin, index=False, encoding="utf-8")
         print(f"Écrit : {chemin.name} ({len(tableau)} lignes)")
     marqueur.write_text(
@@ -199,8 +212,8 @@ def main():
     for serie, cible in visees:
         print(f"  {serie} {cible:%Y-%m}")
 
-    if not verifier_colonnes(fichiers):
-        sys.exit("\nLes colonnes ne correspondent pas au contrat.")
+    if not relire_et_verifier(fichiers):
+        sys.exit("\nLes fichiers ne respectent pas le contrat.")
 
 
 if __name__ == "__main__":

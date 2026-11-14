@@ -18,7 +18,6 @@ FICHIER_SERIES = DOSSIER_DATA / "series.csv"
 FICHIER_PREVISIONS = DOSSIER_RESULTATS / "previsions.csv"
 FICHIER_PREVISIONS_FUTURES = DOSSIER_RESULTATS / "previsions_futures.csv"
 FICHIER_METRIQUES = DOSSIER_RESULTATS / "metriques.csv"
-FICHIER_TESTS_DM = DOSSIER_RESULTATS / "tests_dm.csv"
 
 # ---------------------------------------------------------------------------
 # Source
@@ -41,14 +40,14 @@ UNITE_SOURCES = "Dollars par tonne métrique"
 
 # Correspondance série -> (culture et province telles qu'elles apparaissent
 # dans les fichiers sources, nom du produit dans le tableau de Statistique Canada).
+# Décision de l'équipe : une seule série par produit, dans la principale province
+# productrice (Ontario pour le maïs-grain, Saskatchewan pour le canola). Les
+# provinces voisines (Québec, Alberta) ont des marchés pratiquement jumeaux et
+# ne sont pas retenues.
 SERIES = {
-    "mais_QC": {"culture": "Maïs-grain", "province": "Québec",
-                "produit_statcan": "Maïs-grain"},
     "mais_ON": {"culture": "Maïs-grain", "province": "Ontario",
                 "produit_statcan": "Maïs-grain"},
     "canola_SK": {"culture": "Canola", "province": "Saskatchewan",
-                  "produit_statcan": "Canola (y compris le colza)"},
-    "canola_AB": {"culture": "Canola", "province": "Alberta",
                   "produit_statcan": "Canola (y compris le colza)"},
 }
 LISTE_SERIES = list(SERIES)
@@ -57,16 +56,17 @@ LISTE_SERIES = list(SERIES)
 PRODUIT_PAR_SERIE = {serie: serie.split("_")[0] for serie in SERIES}
 PROVINCE_PAR_SERIE = {serie: serie.split("_")[1] for serie in SERIES}
 
-# Provinces suivies pour chaque produit (le canola n'est pas suivi au Québec
-# ni en Ontario, le maïs-grain ne l'est pas dans les Prairies).
-PROVINCES_PAR_PRODUIT = {}
-for _serie in SERIES:
-    PROVINCES_PAR_PRODUIT.setdefault(PRODUIT_PAR_SERIE[_serie], []).append(PROVINCE_PAR_SERIE[_serie])
+# Une série par produit : produit -> série
+SERIE_PAR_PRODUIT = {PRODUIT_PAR_SERIE[serie]: serie for serie in SERIES}
+LISTE_PRODUITS = list(SERIE_PAR_PRODUIT)
 
-# Valeurs manquantes connues dans les sources, estimées par interpolation
-# linéaire entre les deux mois voisins (notebooks/01_pretraitement.ipynb).
+# Valeurs manquantes connues dans les sources des séries retenues, estimées par
+# interpolation linéaire entre les deux mois voisins. Les deux séries retenues
+# sont complètes ; la seule valeur manquante des sources (canola, Alberta,
+# 2012-05) appartient à une série non retenue. La colonne prix_impute reste
+# dans le contrat (toutes ses valeurs sont False).
 # Toute autre valeur manquante fait échouer scripts/preparer_donnees.py.
-VALEURS_A_IMPUTER = [("canola_AB", "2012-05-01")]
+VALEURS_A_IMPUTER = []
 
 # ---------------------------------------------------------------------------
 # Période et découpage
@@ -75,33 +75,39 @@ DATE_DEBUT = "1985-01-01"
 DATE_FIN = "2026-08-01"
 NB_MOIS_ATTENDU = 500
 
-# Découpage (À VALIDER PAR L'ÉQUIPE) : structure proposée dans
-# notebooks/01_pretraitement.ipynb (trois validations de 12 mois avec
-# entraînement croissant, puis test final réservé), avec un test allongé à
-# 36 mois (choix de Marc) pour que le test de Diebold-Mariano soit calculable
-# à tous les horizons (il exige au moins 2 * pas + 1 = 17 erreurs à 8 pas).
-# Six validations contiguës de 12 mois sur les six années précédant le test
-# (choix de Marc) pour couvrir plusieurs régimes de prix : stable (2017-2020),
-# flambée (2020-2022), sommet et début de baisse (2022-2023). Communs aux
-# quatre séries et aux trois méthodes.
+# Découpage chronologique (décision de l'équipe), défini par mois CIBLES.
+# Communs aux deux séries et aux trois méthodes.
+# - Entraînement : depuis DATE_DEBUT_ENTRAINEMENT, fenêtre croissante jusqu'à
+#   chaque origine.
+# - Validation : six blocs contigus de 12 mois, de 2014-09 à 2020-08 ; sert
+#   seulement au choix du modèle final.
+# - Test : trois périodes contiguës de 24 mois (test_1, test_2, test_3), de
+#   2020-09 à 2026-08 ; test_global fait le bilan sur les 72 mois de test.
 DATE_DEBUT_ENTRAINEMENT = "1985-01-01"
 PERIODES_VALIDATION = [
+    ("2014-09-01", "2015-08-01"),
+    ("2015-09-01", "2016-08-01"),
+    ("2016-09-01", "2017-08-01"),
     ("2017-09-01", "2018-08-01"),
     ("2018-09-01", "2019-08-01"),
     ("2019-09-01", "2020-08-01"),
-    ("2020-09-01", "2021-08-01"),
-    ("2021-09-01", "2022-08-01"),
-    ("2022-09-01", "2023-08-01"),
 ]
-DATE_DEBUT_TEST = "2023-09-01"
-DATE_FIN_TEST = "2026-08-01"
+PERIODES_TEST = {
+    "test_1": ("2020-09-01", "2022-08-01"),
+    "test_2": ("2022-09-01", "2024-08-01"),
+    "test_3": ("2024-09-01", "2026-08-01"),
+}
+DATE_DEBUT_VALIDATION = PERIODES_VALIDATION[0][0]
+DATE_FIN_VALIDATION = PERIODES_VALIDATION[-1][1]
+DATE_DEBUT_TEST = PERIODES_TEST["test_1"][0]
+DATE_FIN_TEST = PERIODES_TEST["test_3"][1]
 
-# Manière de parcourir chaque période (choix de Marc, À VALIDER PAR L'ÉQUIPE) :
-# origine glissante, modèle réestimé à chaque origine. Les mois des périodes
-# de validation et de test sont des mois CIBLES : chaque mois cible est prévu
+# Manière de parcourir chaque période : origine glissante, modèle réestimé à
+# chaque origine. Les mois des périodes de validation et de test sont des
+# mois CIBLES : chaque mois cible est prévu
 # à chaque horizon depuis l'origine date_cible - PAS_PAR_HORIZON[horizon].
 # Les origines peuvent donc précéder la période, mais aucune cible n'en sort
-# (pas de fuite d'une validation vers la suivante ni vers le test).
+# (pas de fuite d'une période vers la suivante).
 MODE_ORIGINE = "glissante"
 REESTIMATION_A_CHAQUE_ORIGINE = True
 
@@ -126,23 +132,34 @@ NIVEAUX_INTERVALLE = [NIVEAU_AFFICHAGE, NIVEAU_ALERTE]
 # ---------------------------------------------------------------------------
 MODELES = ["naif", "ets", "sarima"]
 MODELE_REFERENCE = "naif"
-SEUIL_DM = 0.05
 
 # ---------------------------------------------------------------------------
 # Colonnes des fichiers (contrat)
 # ---------------------------------------------------------------------------
 COLONNES_SERIES = ["date", "serie", "produit", "province", "prix", "prix_impute"]
+# Colonne periode.
+# - previsions.csv : validation, test_1, test_2 ou test_3 ; chaque prévision
+#   n'apparaît qu'une fois.
+# - metriques.csv : les mêmes valeurs, plus test_global, calculé sur l'ensemble
+#   des prévisions de test_1, test_2 et test_3.
+# Validation et test ne sont jamais mélangés dans un calcul.
+PERIODE_VALIDATION = "validation"
+PERIODE_TEST_GLOBAL = "test_global"
+PERIODES_PREVISIONS = [PERIODE_VALIDATION] + list(PERIODES_TEST)
+PERIODES_METRIQUES = PERIODES_PREVISIONS + [PERIODE_TEST_GLOBAL]
+# Périodes de previsions.csv couvertes par chaque période de metriques.csv
+COMPOSITION_PERIODES = {periode: [periode] for periode in PERIODES_PREVISIONS}
+COMPOSITION_PERIODES[PERIODE_TEST_GLOBAL] = list(PERIODES_TEST)
+PERIODE_SELECTION = PERIODE_VALIDATION   # période sur laquelle la règle du modèle final est appliquée
+PERIODE_RAPPORT = PERIODE_TEST_GLOBAL    # période des performances rapportées par défaut
 COLONNES_PREVISIONS = [
-    "serie", "modele", "date_origine", "date_cible", "horizon",
+    "serie", "modele", "periode", "date_origine", "date_cible", "horizon",
     "prevision", "inf80", "sup80", "inf95", "sup95", "reel",
 ]
-COLONNES_PREVISIONS_FUTURES = [c for c in COLONNES_PREVISIONS if c != "reel"]
+COLONNES_PREVISIONS_FUTURES = [c for c in COLONNES_PREVISIONS if c not in ("periode", "reel")]
 COLONNES_METRIQUES = [
-    "modele", "serie", "horizon", "mae", "rmse", "mape",
+    "modele", "serie", "periode", "horizon", "mae", "rmse", "mape",
     "couverture80", "couverture95", "n",
-]
-COLONNES_TESTS_DM = [
-    "serie", "horizon", "modele_a", "modele_b", "stat_dm", "p_valeur", "meilleur",
 ]
 
 # ---------------------------------------------------------------------------
@@ -153,10 +170,8 @@ LIBELLES_PRODUITS = {
     "canola": "Canola",
 }
 LIBELLES_PROVINCES = {
-    "QC": "Québec",
     "ON": "Ontario",
     "SK": "Saskatchewan",
-    "AB": "Alberta",
 }
 LIBELLES_MODELES = {
     "naif": "Naïf (référence)",
@@ -169,3 +184,10 @@ LIBELLES_SERIES = {
     for serie in SERIES
 }
 LIBELLES_HORIZONS = {1: "1 mois", 3: "3 mois", 6: "6 mois"}
+LIBELLES_PERIODES = {
+    "validation": "Validation",
+    "test_1": "Test 1",
+    "test_2": "Test 2",
+    "test_3": "Test 3",
+    "test_global": "Test global",
+}
