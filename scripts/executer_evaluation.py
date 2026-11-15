@@ -49,6 +49,9 @@ n'est supprimé que si toute l'exécution a réussi.
 """
 
 import argparse
+import json
+import hashlib
+from functools import partial
 import importlib
 import sys
 import time
@@ -77,7 +80,7 @@ class ModeleNonDisponible(Exception):
 # ---------------------------------------------------------------------------
 # Modèles
 # ---------------------------------------------------------------------------
-def charger_modele(nom, historique_essai):
+def charger_modele(nom, historique_essai, configuration_ets=None):
     """Retourne la fonction prevoir du module src/modeles/<nom>.py.
 
     Lève ModeleNonDisponible si le module n'a pas de prevoir() ou si un appel
@@ -87,6 +90,8 @@ def charger_modele(nom, historique_essai):
     prevoir = getattr(module, "prevoir", None)
     if not callable(prevoir):
         raise ModeleNonDisponible(f"src/modeles/{nom}.py ne définit pas prevoir()")
+    if nom == "ets":
+        prevoir = partial(prevoir, configuration=configuration_ets)
     try:
         prevoir(historique_essai, [1])
     except NotImplementedError as erreur:
@@ -196,6 +201,27 @@ def main():
     }
     paires = generer_paires_evaluation()
 
+    # Les configurations ETS viennent uniquement de la sélection en validation.
+    choix_ets = {}
+    if "ets" in args.modeles:
+        chemin_choix = config.DOSSIER_RESULTATS / "ets_selection" / "configurations_retenues.json"
+        if not chemin_choix.is_file():
+            sys.exit("Lancer d'abord : python -m scripts.selectionner_ets")
+        document = json.loads(chemin_choix.read_text(encoding="utf-8"))
+        if (document["periodes_validation"] != [list(p) for p in config.PERIODES_VALIDATION]
+                or document["horizons"] != config.HORIZONS
+                or document["delai_publication"] != config.DELAI_PUBLICATION
+                or document["date_debut_entrainement"] != config.DATE_DEBUT_ENTRAINEMENT):
+            raise ValueError("Le protocole a changé : relancer la sélection ETS.")
+        if document["empreinte_series"] != hashlib.sha256(config.FICHIER_SERIES.read_bytes()).hexdigest():
+            raise ValueError("series.csv a changé : relancer la sélection ETS.")
+        choix_ets = document["choix"]
+        if set(choix_ets) != set(config.LISTE_SERIES):
+            raise ValueError("Les choix ETS ne correspondent pas aux séries actuelles.")
+        from src.modeles.ets import CONFIGURATIONS
+        if document["configurations_candidates"] != CONFIGURATIONS:
+            raise ValueError("Les configurations ETS ont changé : relancer la sélection.")
+
     # Modèles disponibles : appel d'essai sur l'historique de la première origine évaluée
     # (même longueur minimale que dans l'évaluation, pour ne pas pénaliser les modèles saisonniers)
     premiere_origine = paires["date_origine"].min()
@@ -203,7 +229,8 @@ def main():
     modeles, ignores = {}, {}
     for nom in args.modeles:
         try:
-            modeles[nom] = charger_modele(nom, historique_essai)
+            modeles[nom] = charger_modele(
+                nom, historique_essai, choix_ets.get(config.LISTE_SERIES[0]))
         except ModeleNonDisponible as raison:
             ignores[nom] = str(raison)
     print("Modèles exécutés :", ", ".join(modeles) or "aucun")
@@ -217,8 +244,9 @@ def main():
     for nom, prevoir in modeles.items():
         for serie, prix in prix_par_serie.items():
             debut_serie = time.perf_counter()
-            morceaux.append(evaluer_serie(nom, prevoir, serie, prix, paires))
-            futurs.append(prevoir_futur(nom, prevoir, serie, prix))
+            fonction = partial(prevoir, configuration=choix_ets[serie]) if nom == "ets" else prevoir
+            morceaux.append(evaluer_serie(nom, fonction, serie, prix, paires))
+            futurs.append(prevoir_futur(nom, fonction, serie, prix))
             print(f"  {nom:<7} {serie:<10} {paires['date_origine'].nunique()} origines "
                   f"({time.perf_counter() - debut_serie:.1f} s)")
     previsions = pd.concat(morceaux, ignore_index=True)
