@@ -1,0 +1,100 @@
+{
+  "choix": {
+    "canola_SK": {
+      "variante": "brut_additif",
+      "configuration": "saisonnalite"
+    },
+    "mais_ON": {
+      "variante": "brut_multiplicatif",
+      "configuration": "saisonnalite"
+    }
+  },
+  "empreinte_series": "7df69ecd93463d6cd2fef596f78a38eb20d1ccce8b2c59f7cad81883fb962e32",
+  "periodes_validation": [
+    [
+      "2014-09-01",
+      "2015-08-01"
+    ],
+    [
+      "2015-09-01",
+      "2016-08-01"
+    ],
+    [
+      "2016-09-01",
+      "2017-08-01"
+    ],
+    [
+      "2017-09-01",
+      "2018-08-01"
+    ],
+    [
+      "2018-09-01",
+      "2019-08-01"
+    ],
+    [
+      "2019-09-01",
+      "2020-08-01"
+    ]
+  ],
+  "horizons": [
+    1,
+    3,
+    6
+  ],
+  "delai_publication": 2,
+  "date_debut_entrainement": "1985-01-01",
+  "configurations_candidates": {
+    "sans_tendance": {
+      "tendance": null,
+      "saisonnalite": null,
+      "amortie": false
+    },
+    "tendance": {
+      "tendance": "add",
+      "saisonnalite": null,
+      "amortie": false
+    },
+    "tendance_amortie": {
+      "tendance": "add",
+      "saisonnalite": null,
+      "amortie": true
+    },
+    "saisonnalite": {
+      "tendance": null,
+      "saisonnalite": "add",
+      "amortie": false
+    },
+    "tendance_saisonnalite": {
+      "tendance": "add",
+      "saisonnalite": "add",
+      "amortie": false
+    },
+    "tendance_amortie_saisonnalite": {
+      "tendance": "add",
+      "saisonnalite": "add",
+      "amortie": true
+    }
+  },
+  "variantes": {
+    "log_additif": {
+      "error": "add",
+      "trend": "add",
+      "seasonal": "add",
+      "log": true
+    },
+    "brut_additif": {
+      "error": "add",
+      "trend": "add",
+      "seasonal": "add",
+      "log": false
+    },
+    "brut_multiplicatif": {
+      "error": "mul",
+      "trend": "mul",
+      "seasonal": "mul",
+      "log": false
+    }
+  },
+  "critere": "Moyenne non pondérée des MAE par horizon, en dollars ; validation seule",
+  "remarque": "Protocole révisé après consultation de tests antérieurs ; évaluation historique."
+}
