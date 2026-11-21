@@ -13,7 +13,7 @@ Données : Statistique Canada, tableau 32-10-0077-01 (prix des produits agricole
 - Prétraitement détaillé : notebooks/01_pretraitement.ipynb. Fichier commun aux trois méthodes : data/series.csv, produit par scripts/preparer_donnees.py.
 
 ## Décisions méthodologiques
-- Modèles : naïf (référence), ETS/Holt-Winters, SARIMA ; une personne par modèle (Sabra : naïf, Hanane : ETS, Marc : SARIMA)
+- Modèles : naïf (référence), ETS, SARIMA ; une personne par modèle (Sabra : naïf, Hanane : ETS, Marc : SARIMA)
 - Découpage chronologique (décision de l'équipe), défini par mois **cibles**, commun aux deux séries et aux trois méthodes (src/config.py) :
 
 | Période | Mois cibles | Mois | Rôle |

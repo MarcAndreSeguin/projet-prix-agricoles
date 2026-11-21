@@ -115,9 +115,3 @@ else:
             "Écart à la borne": en_cours["ecart_pct"].map(ic.formater_pct),
         })
         st.dataframe(tableau, hide_index=True, use_container_width=True)
-
-# ---------------------------------------------------------------------------
-# Commentaire de l'équipe
-# ---------------------------------------------------------------------------
-st.markdown("## Commentaire")
-st.markdown("> **À RÉDIGER PAR L'ÉQUIPE**")

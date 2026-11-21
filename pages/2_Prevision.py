@@ -123,9 +123,3 @@ st.download_button(
     file_name=f"previsions_{selection.serie}_{selection.modele}_{derniere_date:%Y-%m}.csv",
     mime="text/csv",
 )
-
-# ---------------------------------------------------------------------------
-# Commentaire de l'équipe
-# ---------------------------------------------------------------------------
-st.header("Commentaire")
-st.markdown("> **À RÉDIGER PAR L'ÉQUIPE**")

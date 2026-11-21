@@ -4,8 +4,8 @@ des limites de l'outil.
 Le contenu descriptif reprend docs/protocole.md et notebooks/01_pretraitement.ipynb
 (contrôles, valeurs estimées et statistiques recalculés à partir de data/series.csv) :
 séries et choix des provinces, découpage chronologique, métriques et leurs formules,
-règle du modèle final. Les sections « Limites » et « Recommandations » sont rédigées
-par l'équipe.
+règle du modèle final. Les sections « Limites » et « Recommandations » reprennent le texte
+rédigé par l'équipe pour le rapport.
 """
 
 import pandas as pd
@@ -277,10 +277,63 @@ que le logarithme du prix futur suit une loi normale centrée sur le logarithme 
 """)
 
 # ---------------------------------------------------------------------------
-# Sections rédigées par l'équipe
+# Limites et recommandations (texte de l'équipe, repris du rapport)
 # ---------------------------------------------------------------------------
 st.header("Limites")
-st.markdown("> **À RÉDIGER PAR L'ÉQUIPE**")
+st.markdown("""
+Les résultats doivent être interprétés en tenant compte de plusieurs limites.
+Premièrement, l'étude porte sur deux séries seulement : le maïs-grain en Ontario et le
+canola en Saskatchewan. Les conclusions ne peuvent donc pas être généralisées à toutes les
+cultures, à toutes les provinces ou à tous les marchés agricoles. Les prix utilisés sont
+des prix mensuels nominaux en dollars par tonne métrique : ils ne sont pas corrigés de
+l'inflation et ne représentent pas nécessairement le prix obtenu par chaque producteur
+selon la qualité, la localisation, le contrat ou les coûts de transport.
+
+Deuxièmement, les prix mensuels sont publiés avec un délai d'environ deux mois. L'outil
+travaille donc sur des données qui ne reflètent pas immédiatement les conditions du marché
+au moment de la consultation. En outre, les modèles utilisent seulement l'historique des
+prix : ils n'intègrent pas de variables explicatives comme les précipitations, les
+rendements, les stocks, les coûts des engrais et du carburant, les taux de change, les
+prix à terme ou les événements géopolitiques.
+
+Troisièmement, les modèles naïf, ETS et SARIMA reposent sur des régularités historiques
+qui peuvent être perturbées par des changements de régime ou des événements
+exceptionnels ; les performances varient d'ailleurs nettement entre les trois périodes de
+test. Les intervalles présentent aussi des limites : pour l'ETS du canola, la couverture
+observée est nettement inférieure aux niveaux de 80 % et de 95 %, ce qui montre que
+l'incertitude est sous-estimée dans cette configuration.
+
+Enfin, le protocole de sélection repose sur la MAE moyenne des trois horizons. Ce critère
+est simple et comparable, mais il ne résume pas toutes les qualités d'un modèle : il ne
+mesure ni la calibration des intervalles, ni le coût des erreurs selon leur sens, ni
+l'utilité économique d'une prévision pour une décision donnée. Les résultats constituent
+donc une évaluation dans le cadre défini par le projet, et non une garantie de performance
+future.
+""")
 
 st.header("Recommandations")
-st.markdown("> **À RÉDIGER PAR L'ÉQUIPE**")
+st.markdown("""
+Pour l'utilisation courante, il est recommandé à l'analyste de lire les prévisions comme
+des ordres de grandeur et de toujours examiner les intervalles associés. Les prévisions à
+un mois peuvent être privilégiées pour le suivi à court terme, tandis que celles à trois
+et six mois demandent plus de prudence, puisque l'erreur augmente généralement avec
+l'horizon. L'analyste devrait aussi vérifier la date de la dernière donnée disponible et
+tenir compte du délai de publication.
+
+Les alertes devraient servir de signaux invitant à examiner un prix, à vérifier les
+données et à rechercher un contexte explicatif, plutôt que de déclencheurs de décisions
+automatiques. Cette précaution est particulièrement importante pour le canola, dont les
+intervalles ETS sont trop étroits au test global. L'analyste peut compléter l'information
+de l'application par les bulletins de marché, les données météorologiques et les
+informations sur les stocks et les marchés internationaux.
+
+Plusieurs pistes peuvent améliorer l'outil. La première consiste à recalibrer les
+intervalles de prévision, notamment pour le canola, afin que leur couverture se rapproche
+des niveaux annoncés. La deuxième consiste à enrichir les modèles avec des variables
+externes : conditions météorologiques, rendements, stocks, coûts des intrants, taux de
+change ou prix de référence internationaux. La troisième consiste à suivre régulièrement
+les performances sur les nouvelles données et à réévaluer les modèles lorsque les
+conditions du marché changent. Enfin, d'autres modèles pourraient être comparés, à
+condition de conserver une séparation chronologique rigoureuse entre la sélection et
+l'évaluation.
+""")

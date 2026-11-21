@@ -140,9 +140,3 @@ ic.afficher_graphique(ic.graphique_previsions_reel(p, modeles_affiches))
 st.caption(f"Chaque point est la prévision faite {config.PAS_PAR_HORIZON[horizon]} mois avant la "
            "date cible (horizon de consultation "
            f"{config.LIBELLES_HORIZONS[horizon]}), comparée au prix observé à cette date.")
-
-# ---------------------------------------------------------------------------
-# Commentaire de l'équipe
-# ---------------------------------------------------------------------------
-st.header("Commentaire")
-st.markdown("> **À RÉDIGER PAR L'ÉQUIPE**")

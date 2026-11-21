@@ -128,9 +128,3 @@ st.dataframe(ic.tableau_statistiques(statistiques), hide_index=True, use_contain
 st.caption(f"Prix en {config.UNITE_PRIX}, de {ic.formater_mois(series['date'].min())} à "
            f"{ic.formater_mois(series['date'].max())}, hors valeur estimée (même calcul que "
            "notebooks/01_pretraitement.ipynb).")
-
-# ---------------------------------------------------------------------------
-# Commentaire de l'équipe
-# ---------------------------------------------------------------------------
-st.header("Commentaire")
-st.markdown("> **À RÉDIGER PAR L'ÉQUIPE**")

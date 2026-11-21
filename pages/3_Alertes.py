@@ -91,9 +91,3 @@ if not choisies.empty:
         "Sens": au_dessus.map({True: "▲ Hausse", False: "▼ Baisse"}),
     })
     st.dataframe(tableau, hide_index=True, use_container_width=True)
-
-# ---------------------------------------------------------------------------
-# Commentaire de l'équipe
-# ---------------------------------------------------------------------------
-st.header("Commentaire")
-st.markdown("> **À RÉDIGER PAR L'ÉQUIPE**")

@@ -175,7 +175,7 @@ LIBELLES_PROVINCES = {
 }
 LIBELLES_MODELES = {
     "naif": "Naïf (référence)",
-    "ets": "ETS / Holt-Winters",
+    "ets": "ETS",
     "sarima": "SARIMA",
 }
 LIBELLES_SERIES = {
